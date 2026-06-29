@@ -1,0 +1,11 @@
+.gradle/
+build/
+**/build/
+
+# MkDocs build output + the Dokka API reference generated into docs/public/api at build time.
+site/
+docs/public/api/
+
+# IDE
+.idea/
+*.iml

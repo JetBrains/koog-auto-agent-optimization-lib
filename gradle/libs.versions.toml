@@ -1,0 +1,20 @@
+[versions]
+kotlin = "2.3.0"
+koog = "0.8.0-SNAPSHOT"
+serialization = "1.9.0"
+kotlin-logging = "7.0.3"
+logback = "1.5.21"
+dokka = "2.0.0"
+
+[libraries]
+koog = { module = "ai.koog:koog-agents", version.ref = "koog" }
+koog-serialization = { module = "ai.koog:serialization-core", version.ref = "koog" }
+koog-test = { module = "ai.koog:agents-test", version.ref = "koog" }
+kotlin-serialization = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+kotlin-logging = { module = "io.github.oshai:kotlin-logging-jvm", version.ref = "kotlin-logging" }
+logback = { module = "ch.qos.logback:logback-classic", version.ref = "logback" }
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
+dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }

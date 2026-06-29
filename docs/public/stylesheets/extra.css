@@ -1,0 +1,8 @@
+.md-typeset table:not([class]) td {
+    white-space: nowrap;
+}
+
+.md-source__icon svg {
+    width: 1.5rem;
+    height: 1.5rem;
+}

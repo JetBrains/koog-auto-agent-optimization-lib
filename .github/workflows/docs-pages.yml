@@ -1,0 +1,77 @@
+name: Publish Docs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/public/**
+      - mkdocs.yml
+      - docs/requirements.txt
+      - koog-agents-optimization/src/**
+      - .github/workflows/docs-pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # The library compiles against a fork of Koog (optimizable-subgraph support) that isn't on
+      # Maven Central; Dokka needs it on the classpath. Publish it to mavenLocal first.
+      - name: Publish Koog fork to mavenLocal
+        run: |
+          git clone --depth 1 --branch stable-agent-optimization https://github.com/valemore/koog.git /tmp/koog-fork
+          cd /tmp/koog-fork
+          ./gradlew --no-daemon publishToMavenLocal
+
+      - name: Build Dokka HTML (API reference)
+        run: ./gradlew --no-daemon :koog-agents-optimization:dokkaGeneratePublicationHtml
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install MkDocs Material
+        run: pip install -r docs/requirements.txt
+
+      - name: Embed API reference under /api
+        run: |
+          rm -rf docs/public/api
+          mkdir -p docs/public/api
+          cp -r koog-agents-optimization/build/dokka/html/. docs/public/api/
+
+      - name: Build site
+        run: mkdocs build --strict --site-dir site
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4

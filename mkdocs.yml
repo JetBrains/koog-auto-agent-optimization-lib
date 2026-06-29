@@ -1,0 +1,82 @@
+site_name: Koog Agents Optimization
+site_description: Automatic optimization for Koog agents — make an agent optimizable and run optimizers (BootstrapFewShot, MIPRO, GEPA, ACE) over it.
+site_url: https://jetbrains.github.io/koog-auto-agent-optimization-package/
+repo_url: https://github.com/JetBrains/koog-auto-agent-optimization-package
+repo_name: GitHub
+edit_uri: edit/main/docs/public/
+copyright: Copyright © 2026 JetBrains s.r.o.
+
+# Public portal sources only. docs/dev/ is intentionally excluded (internal contributor docs).
+docs_dir: docs/public
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - content.action.edit
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.instant
+    - navigation.expand
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - toc.follow
+  font:
+    text: Roboto
+    code: Roboto Mono
+  palette:
+    # Light mode
+    - scheme: default
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+    # Dark mode
+    - scheme: slate
+      primary: black
+      accent: blue
+      toggle:
+        icon: material/toggle-switch-off-outline
+        name: Switch to light mode
+
+nav:
+  - Documentation:
+      - Overview: index.md
+      - Getting started: getting-started.md
+      - Making your agent optimizable: optimizable-agents.md
+      - Optimizers: optimizers.md
+      - Custom optimizers: custom-optimizers.md
+  - API Reference: api/index.html
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.details
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search
