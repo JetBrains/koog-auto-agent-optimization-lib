@@ -48,6 +48,10 @@ public enum class ComponentSelection {
  * An instruction-only optimizer that evolves module instructions via reflective LLM feedback
  * on failure cases, with Pareto-based candidate selection for diversity.
  *
+ * **Early implementation.** This is a non-official re-implementation that deviates from the original
+ * GEPA algorithm (https://arxiv.org/abs/2507.19457) and may underperform the paper. Validate on your
+ * own task before relying on it; closing the gap is future work.
+ *
  * Key differences from MIPROv2:
  * - Optimizes instructions only (no demonstrations) -> shorter, more generalizable prompts
  * - Uses textual feedback from a reflection LM analyzing failure traces

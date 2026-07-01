@@ -1,6 +1,7 @@
 package ai.koog.agents.optimization.common.results
 
 
+import ai.koog.agents.optimization.common.FailureKind
 import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
@@ -20,7 +21,7 @@ public data class FinalFailures(
     val total: Int = 0,
     /** Final failures bucketed by `FailureKind`; entries carry per-kind counts, ratios, and per-`resolvedId` frequencies. */
     @EncodeDefault(EncodeDefault.Mode.NEVER)
-    val byKind: Map<ai.koog.agents.optimization.common.FailureKind, FailureKindEntry> = emptyMap(),
+    val byKind: Map<FailureKind, FailureKindEntry> = emptyMap(),
 )
 
 /**

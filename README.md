@@ -38,8 +38,8 @@ git clone https://github.com/valemore/koog.git
 cd koog && git checkout tags/stable-agent-optimization && ./gradlew publishToMavenLocal && cd ..
 
 # 2. This library
-git clone https://github.com/JetBrains/koog-auto-agent-optimization-package.git
-cd koog-auto-agent-optimization-package && ./gradlew :koog-agents-optimization:publishToMavenLocal
+git clone https://github.com/JetBrains/koog-auto-agent-optimization-lib.git
+cd koog-auto-agent-optimization-lib && ./gradlew :koog-agents-optimization:publishToMavenLocal
 ```
 
 Then depend on it — both resolve from `mavenLocal()`:
@@ -81,17 +81,26 @@ val answer = optimized.run("What is the weather right now? Answer with a single 
 
 The full step-by-step walkthrough (building `executor`, the dataset/metric/serializers, and
 `trainingSession`) is in the
-[Getting started guide](https://jetbrains.github.io/koog-auto-agent-optimization-package/getting-started/).
+[Getting started guide](https://jetbrains.github.io/koog-auto-agent-optimization-lib/getting-started/).
 
 ## Runnable examples
 
 Self-contained examples of optimizing agents and authoring custom optimizers live in the
-[`koog-optimization-examples`](https://github.com/JetBrains/koog-auto-agent-optimization-package/tree/main/koog-optimization-examples)
+[`koog-optimization-examples`](https://github.com/JetBrains/koog-auto-agent-optimization-lib/tree/main/koog-optimization-examples)
 module:
 
 ```bash
 ./gradlew :koog-optimization-examples:run
 ```
+
+## Documentation
+
+- [Overview](https://jetbrains.github.io/koog-auto-agent-optimization-lib/)
+- [Getting started](https://jetbrains.github.io/koog-auto-agent-optimization-lib/getting-started/)
+- [Making your agent optimizable](https://jetbrains.github.io/koog-auto-agent-optimization-lib/optimizable-agents/)
+- [Optimizers](https://jetbrains.github.io/koog-auto-agent-optimization-lib/optimizers/)
+- [Custom optimizers](https://jetbrains.github.io/koog-auto-agent-optimization-lib/custom-optimizers/)
+- [API reference](https://jetbrains.github.io/koog-auto-agent-optimization-lib/api/)
 
 ## License
 

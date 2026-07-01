@@ -60,14 +60,9 @@ public inline fun <reified Input, reified Output> AIAgent.Companion.invokeGraphA
     maxIterations: Int = 50,
     noinline installFeatures: GraphAIAgent.FeatureContext.() -> Unit = {},
 ): GraphAIAgent<Input, Output> {
-    /**
-     * I don't understand, why in Koog 0.5.1, the AIAgent is an interface,
-     * which has two implementations -- FunctionalAgent and GraphAgent.
-     * It is impossible to implement something abstract for the AIAgent, as all the
-     * properties are moved to particular implementations. At the same time, those implementations
-     * are very common.
-     * TODO: Find out why is that and how to deal with it
-     */
+    // Koog splits AIAgent into FunctionalAgent and GraphAgent implementations, with the shared
+    // properties living on each implementation rather than the interface, so this helper targets
+    // GraphAIAgent concretely.
     return GraphAIAgent(
         inputType = typeOf<Input>(),
         outputType = typeOf<Output>(),

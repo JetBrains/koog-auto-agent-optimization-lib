@@ -12,10 +12,10 @@ import ai.koog.agents.optimization.optimizers.TrainSetItem
 /**
  * Shared execution resources created once per training session.
  *
- * Holds the tracked agent, the injected execution seams (consumption capture, failure analysis,
- * per-item context, agent invocation), and configuration shared across all scope instances.
+ * Holds the tracked agent, the injected execution collaborators (consumption capture, failure
+ * analysis, per-item context, agent invocation), and configuration shared across all scope instances.
  *
- * The seam collaborators ([failureAnalyzer], [consumptionCollector], [capturingExecutorFactory],
+ * These collaborators ([failureAnalyzer], [consumptionCollector], [capturingExecutorFactory],
  * [runAgentAttempt], [withItemContext]) are supplied by the app; the defaults make the resources
  * usable on their own (no consumption, no provider-specific recognition, plain agent runs).
  */

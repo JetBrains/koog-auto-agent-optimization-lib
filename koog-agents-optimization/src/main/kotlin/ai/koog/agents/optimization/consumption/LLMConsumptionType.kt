@@ -9,7 +9,8 @@ import kotlinx.serialization.json.JsonObject
  * must list its implementation in
  * `META-INF/services/ai.koog.agents.optimization.consumption.LLMConsumptionType`. This lets the
  * library decode any consumption flavor present on the classpath without compile-time knowledge
- * of provider-specific types (e.g. the library never references Grazie consumption).
+ * of provider-specific types (e.g. the library never references a consumption type defined by the
+ * consuming app).
  */
 public interface LLMConsumptionType {
     /** The unit this type decodes; its [LLMConsumptionUnit.displayLabel] is the registry key. */

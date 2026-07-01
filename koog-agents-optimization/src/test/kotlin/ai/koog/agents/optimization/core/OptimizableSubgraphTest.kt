@@ -1,4 +1,4 @@
-package com.jetbrains.apr.agentOptimization.optimizationCore
+package ai.koog.agents.optimization.core
 
 import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.agent.ToolCalls

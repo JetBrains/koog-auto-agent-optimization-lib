@@ -48,6 +48,18 @@ public data class AnalyzedFailure(
 }
 
 /**
+ * Resolved-ids the library itself references by value. Recognizers (which live in the consuming app)
+ * produce these when they detect the corresponding failure, and the library reads them — e.g. the
+ * retry executor emits a tailored WARN addendum when an exhausted retry carries
+ * [GEN_AI_AGENT_SPAN_CLEANUP]. Keeping them here, next to the failure taxonomy, keeps the WARN and
+ * the recognizer in sync.
+ */
+public object KnownResolvedIds {
+    /** Koog's OpenTelemetry span-cleanup wrapper (`LLMCallInFlight:GenAIAgentSpanCleanup`). */
+    public const val GEN_AI_AGENT_SPAN_CLEANUP: String = "LLMCallInFlight:GenAIAgentSpanCleanup"
+}
+
+/**
  * High-level categorization of failures occurred during experiments:
  * - AGENT_EXECUTION: likely related to agent logic / prompting / model capability (could potentially be improved).
  * - EXTERNAL_ENVIRONMENT: infrastructure issues (network / provider / API / MCP server), usually worth re-checking environment and rerunning.

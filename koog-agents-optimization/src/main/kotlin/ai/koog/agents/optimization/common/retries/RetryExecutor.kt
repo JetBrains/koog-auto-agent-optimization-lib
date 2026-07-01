@@ -2,19 +2,13 @@ package ai.koog.agents.optimization.common.retries
 
 
 import ai.koog.agents.optimization.common.AnalyzedFailure
+import ai.koog.agents.optimization.common.KnownResolvedIds
 import ai.koog.agents.optimization.common.TransiencyLevel
 import ai.koog.agents.optimization.common.abort.ExecutionAbortException
 import ai.koog.agents.optimization.utils.serialization.LLMConsumptionOrNA
 import io.github.oshai.kotlinlogging.KLogger
 import kotlinx.coroutines.delay
 import kotlin.time.Duration
-
-/**
- * Resolved-id of the heuristic recognizer for Koog's OpenTelemetry span-cleanup wrapper. Carried as
- * a constant because the retry executor reads it to emit a tailored WARN addendum on exhausted retries,
- * and failure recognizers produce it when they detect the wrapper.
- */
-public const val GenAIAgentSpanCleanupResolvedId: String = "LLMCallInFlight:GenAIAgentSpanCleanup"
 
 /**
  * Metrics the retry wrapper collects after each attempt (success or failure). The caller supplies
@@ -217,7 +211,7 @@ private fun emitNonRetryEvent(
         else -> {
             // Exhausted retries — TRANSIENT past maxAttempts (or UNKNOWN past maxAttempts under Lenient).
             val totalAttempts = policy.maxAttempts + 1
-            val genAINote = if (failure.resolvedId == GenAIAgentSpanCleanupResolvedId) {
+            val genAINote = if (failure.resolvedId == KnownResolvedIds.GEN_AI_AGENT_SPAN_CLEANUP) {
                 "\n[RETRIES] The exhausted retries above were on a GenAIAgentSpan wrapper, whose underlying " +
                         "cause is not preserved on the exception. Some sub-cases hidden by this wrapper " +
                         "(e.g., request-timeouts) are non-retryable — they would have wasted these retry attempts. " +

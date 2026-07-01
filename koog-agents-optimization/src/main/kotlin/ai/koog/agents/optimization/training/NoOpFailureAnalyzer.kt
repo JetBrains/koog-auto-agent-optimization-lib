@@ -9,7 +9,7 @@ import ai.koog.agents.optimization.common.TransiencyLevel
  * A provider-agnostic [FailureAnalyzer] that classifies every exception as [FailureKind.UNKNOWN] /
  * [TransiencyLevel.UNKNOWN] — i.e. it makes no retryable-vs-terminal judgement.
  *
- * This is the default seam when no provider-specific recognizers are wired in: the retry loop then
+ * This is the default when no provider-specific recognizers are wired in: the retry loop then
  * treats failures according to its [ai.koog.agents.optimization.common.retries.RetryPolicy]
  * (conservative by default). Supply a richer [FailureAnalyzer] to get smart transient-error retries.
  */

@@ -1,7 +1,7 @@
 # Optimizers reference
 
-The library ships four optimizers. They all implement the same SPI, so once you
-know how to drive one, you know how to drive all of them:
+The library ships four optimizers. They all implement the same interface, so once
+you know how to drive one, you know how to drive all of them:
 
 ```kotlin
 public interface AgentOptimizer<Input, Output, InputLabel> {
@@ -32,6 +32,10 @@ serializers, and call `trainingSession(...)`), then pick an optimizer below.
     original references — due to technical constraints of the Koog runtime, differences in the agent
     model, or pragmatic simplifications — but we have tried to preserve the core semantics of each.
     For the authoritative description of any algorithm, consult its original source below.
+
+    **ACE optimizer deviates the most.** Its current implementation differs from the original
+    algorithm in ways that can affect results. Treat it, and other optimizers, as
+    early, and validate on your own task before relying on them. Closing the gap is future work.
 
     | Optimizer | Original authors | Reference |
     |---|---|---|
@@ -265,5 +269,5 @@ agent. This is how you deploy an optimized agent without re-running optimization
   modules with `optimizableSubgraphWithTask`, and strategy- vs subgraph-level
   optimization.
 - [Writing a custom optimizer](custom-optimizers.md) — implement the
-  `AgentOptimizer` SPI with the `StageScope` training DSL.
+  `AgentOptimizer` interface with the `StageScope` training DSL.
 - [API reference](api/index.html) — full Dokka docs.

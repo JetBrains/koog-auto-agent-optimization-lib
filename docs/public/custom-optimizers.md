@@ -8,7 +8,7 @@ A custom optimizer plugs into the same two-phase flow as the built-ins, so the r
 dataset, metric, [`trainingSession(...)`](getting-started.md), `train` / `loadOptimizedAgent` — stays
 identical.
 
-## The SPI
+## The optimizer interface
 
 An optimizer implements `AgentOptimizer<Input, Output, InputLabel>` (package
 `ai.koog.agents.optimization.optimizers`):
@@ -41,10 +41,11 @@ val answer = optimized.run(input)
 
 ## The opt-in marker
 
-Authoring an optimizer touches the training DSL, which is gated behind `@OptimizationExtensionApi`
-(package `ai.koog.agents.optimization.annotations`). This marker covers `AgentOptimizer`, the
-`TrainingSession`, and the `StageScope` DSL — the advanced *extension* surface for people building
-optimizers, not the everyday optimize-with-a-built-in flow.
+Composing an optimizer's own training stages touches the stage-authoring DSL, which is gated behind
+`@OptimizationExtensionApi` (package `ai.koog.agents.optimization.annotations`). This marker covers
+only the `StageScope` builder and its helpers (`StageScopeImpl`, `TrainingDsl`, `ActionLogBuilder`) —
+the advanced *extension* surface for stage logic. `AgentOptimizer` and `TrainingSession` themselves
+are plain-public.
 
 Opt in at the top of your file:
 
@@ -59,7 +60,7 @@ the optimizer.
 ## The smallest example
 
 `RunOnceOptimizer` is the minimal complete implementation: it runs the agent once over each dataset
-item (recording metrics) and applies no transformation. It exists to show the SPI shape.
+item (recording metrics) and applies no transformation. It exists to show the interface shape.
 
 ```kotlin
 @file:OptIn(OptimizationExtensionApi::class)
@@ -155,10 +156,8 @@ class MyOptimizer<Input, Output, InputLabel>(
 
 The built-in optimizers are the best worked reference — read their source under
 `koog-agents-optimization/src/main/kotlin/ai/koog/agents/optimization/optimizers/`
-(`fewShot/`, `mipro/`, `gepa/`, `ace/`). For a full treatment of `OptimizationArtifact`, the feature
-mechanism (`copyWith` + `installFeatures`), and trace collection from successful runs, see the
-[optimizer-authoring guide](https://github.com/JetBrains/koog-auto-agent-optimization/blob/main/docs/dev/OPTIMIZER_AUTHORING_GUIDE.md)
-in the repository.
+(`fewShot/`, `mipro/`, `gepa/`, `ace/`) for a full treatment of `OptimizationArtifact`, the feature
+mechanism (`copyWith` + `installFeatures`), and trace collection from successful runs.
 
 ## Next
 

@@ -1,16 +1,18 @@
 package ai.koog.agents.optimization.annotations
 
 /**
- * Marks the **optimizer-authoring SPI** of this library: [ai.koog.agents.optimization.optimizers.AgentOptimizer],
- * the training session and DSL, records, metrics, and the abort framework.
+ * Marks the **stage-authoring DSL** of this library — the `StageScope` builder, its `run*`/`execute*`
+ * extensions and helper records, `StageScopeImpl`, `TrainingDsl`, and `ActionLogBuilder`. This is the
+ * surface you touch only when composing an optimizer's own training stages.
  *
- * Code that merely *makes an agent optimizable* or *reads results* (the `core`, `features`, and
- * `consumption` packages plus `optimizers.TrainSet`) is plain-public and needs no opt-in. Everything
- * behind this marker is public but **subject to change** — opt in deliberately with
- * `@OptIn(OptimizationExtensionApi::class)` (or a build-wide opt-in) when authoring an optimizer.
+ * Everything else an optimizer author uses is plain-public and needs no opt-in: `AgentOptimizer`,
+ * `TrainingSession`, the records, metrics, and the abort framework, as well as the `core`, `features`,
+ * and `consumption` packages and `optimizers.TrainSet`. Code behind this marker is public but
+ * **subject to change** — opt in deliberately with `@OptIn(OptimizationExtensionApi::class)` (or a
+ * build-wide opt-in) when writing stage logic against `StageScope`.
  */
 @RequiresOptIn(
-    message = "This is part of the optimizer-authoring SPI and may change between releases. " +
+    message = "This is part of the stage-authoring DSL and may change between releases. " +
         "Opt in with @OptIn(OptimizationExtensionApi::class).",
     level = RequiresOptIn.Level.WARNING,
 )

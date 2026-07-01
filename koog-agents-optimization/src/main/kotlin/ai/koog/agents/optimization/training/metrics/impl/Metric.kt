@@ -50,10 +50,10 @@ public interface Metric {
                 @Suppress("UNCHECKED_CAST")
                 instance::class.serializer() as SerializationStrategy<Metric>
             }
-            // TODO: deserialization will not work at all, but it's not needed yet.
-            //   If we ever need it, the correct workaround is to manually list all metric classes here.
-            //   Custom metrics will unfortunately need to be listed too.
-            //   See https://github.com/Kotlin/kotlinx.serialization/blob/master/docs/polymorphism.md#open-polymorphism
+            // Serialization only: records are written, never read back, so no polymorphic
+            // deserializer is registered here. To add reading later, list every metric subclass
+            // explicitly (custom metrics included) per kotlinx.serialization's open-polymorphism docs:
+            // https://github.com/Kotlin/kotlinx.serialization/blob/master/docs/polymorphism.md#open-polymorphism
         }
     }
 }

@@ -110,7 +110,7 @@ explained step by step — is in [getting-started.md](getting-started.md).
 - [getting-started.md](getting-started.md) — minimal end-to-end: BootstrapFewShot over the weather agent.
 - [optimizable-agents.md](optimizable-agents.md) — make an agent optimizable with `optimizableSubgraphWithTask`; strategy- vs subgraph-level optimization.
 - [optimizers.md](optimizers.md) — reference for all four optimizers: what each learns, when to use it, and constructors.
-- [custom-optimizers.md](custom-optimizers.md) — author your own optimizer with the `@OptimizationExtensionApi` SPI.
+- [custom-optimizers.md](custom-optimizers.md) — author your own optimizer with the `AgentOptimizer` extension API.
 - [API reference](api/index.html) — generated API docs.
 - **Runnable examples** — live in the `:koog-optimization-examples` module of the
-  [source repository](https://github.com/JetBrains/koog-auto-agent-optimization); clone it to run them.
+  [source repository](https://github.com/JetBrains/koog-auto-agent-optimization-lib); clone it to run them.

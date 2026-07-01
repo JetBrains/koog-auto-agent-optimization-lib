@@ -31,6 +31,10 @@ import kotlinx.serialization.Serializable
  * curator LLM turns those insights into [DeltaUpdate]s that grow and refine the playbook. The resulting
  * playbook is injected into the agent's system prompt at run time via [ACEPlaybookFeature].
  *
+ * **Early implementation.** This is a non-official re-implementation that deviates from the original
+ * ACE algorithm (https://arxiv.org/abs/2510.04618) and may underperform the paper. Validate on your
+ * own task before relying on it; closing the gap is future work.
+ *
  * @param playbookStoragePath Where the optimized [ACEPlaybook] is read from and written to.
  * @param onExistingPlaybook How to handle a playbook already present at [playbookStoragePath]; see [OnExistingPlaybookAction].
  * @param reflectorModel Model used to diagnose trajectories into insights.

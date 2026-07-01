@@ -19,8 +19,13 @@ import io.github.oshai.kotlinlogging.KotlinLogging
  * cluster/spend-limit metadata.
  *
  * Reach for the [TrainingResources]/[TrainingSession] constructors directly when you need to
- * customize any of those seams (provider-specific failure analysis, retries, abort policies,
- * progress listeners, cluster metadata, …).
+ * customize any of those injection points (provider-specific failure analysis, retries, abort
+ * policies, progress listeners, cluster metadata, …), or to persist a training-records JSON — this
+ * builder keeps records in-memory only ([TrainingSession.use] returns them as a `TrainingResult`).
+ *
+ * The [serializers] are still required despite the missing records file: they serialize that
+ * in-memory result and the optimizer's own saved artifact, which is written separately by the
+ * optimizer regardless of the records path.
  *
  * To capture real token consumption per agent run, build [trackedAgent] on a
  * [LiteLLMConsumptionCapturingPromptExecutor] and pass its `collectAndClear` as [consumptionCollector]:

@@ -1,7 +1,7 @@
 site_name: Koog Agents Optimization
 site_description: Automatic optimization for Koog agents — make an agent optimizable and run optimizers (BootstrapFewShot, MIPRO, GEPA, ACE) over it.
-site_url: https://jetbrains.github.io/koog-auto-agent-optimization-package/
-repo_url: https://github.com/JetBrains/koog-auto-agent-optimization-package
+site_url: https://jetbrains.github.io/koog-auto-agent-optimization-lib/
+repo_url: https://github.com/JetBrains/koog-auto-agent-optimization-lib
 repo_name: GitHub
 edit_uri: edit/main/docs/public/
 copyright: Copyright © 2026 JetBrains s.r.o.

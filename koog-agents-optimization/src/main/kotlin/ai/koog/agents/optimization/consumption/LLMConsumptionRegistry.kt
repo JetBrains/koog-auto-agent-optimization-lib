@@ -8,7 +8,8 @@ import java.util.ServiceLoader
  *
  * Discovery is lazy (on first use) and uses the thread context classloader, so there is no
  * startup-ordering requirement: whichever provider jars are present contribute their flavors.
- * The library ships LiteLLM; the app ships Grazie via its own `META-INF/services` entry.
+ * The library ships LiteLLM; the consuming app contributes its own provider-specific flavors via its
+ * own `META-INF/services` entry.
  */
 public object LLMConsumptionRegistry {
     private val types: List<LLMConsumptionType> by lazy {

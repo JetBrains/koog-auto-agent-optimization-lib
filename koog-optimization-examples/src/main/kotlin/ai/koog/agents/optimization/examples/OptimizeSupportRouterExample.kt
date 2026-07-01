@@ -48,9 +48,8 @@ import kotlinx.coroutines.runBlocking
 
 private val origMessageKey = createStorageKey<String>("orig-support-message")
 
-/** Allowed routing codes — intentionally NOT mentioned in the baseline instructions below. */
-@Suppress("unused")
-private const val ROUTING_CODES = "BILLING (payments/invoices), TECH (bugs/errors/login), OTHER"
+/** Allowed routing codes are: BILLING (payments/invoices), TECH (bugs/errors/login), OTHER
+ * intentionally NOT mentioned in the baseline instructions below. */
 
 private fun supportRouterStrategy(): AIAgentGraphStrategy<String, String> =
     strategy("support-router") {
@@ -120,6 +119,8 @@ fun main() = runBlocking {
         serializeOutput = { it },
     )
 
+    // Built by hand (rather than via `trainingSession(...)`) to show the lower-level
+    // TrainingResources/TrainingSession API the builder wraps.
     val resources = TrainingResources(
         trackedAgent = agent,
         dataset = dataset,

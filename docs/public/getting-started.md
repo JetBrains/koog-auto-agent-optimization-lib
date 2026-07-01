@@ -238,11 +238,11 @@ original `agent` is left untouched.
 
 The runnable examples (`OptimizeWeatherAgentExample`, `OptimizeSupportRouterExample`,
 `AuthorCustomOptimizerExample`) live in the `:koog-optimization-examples` module **of the
-[source repository](https://github.com/JetBrains/koog-auto-agent-optimization)**; clone the repo to run them:
+[source repository](https://github.com/JetBrains/koog-auto-agent-optimization-lib)**; clone the repo to run them:
 
 ```bash
-git clone https://github.com/JetBrains/koog-auto-agent-optimization.git
-cd koog-auto-agent-optimization
+git clone https://github.com/JetBrains/koog-auto-agent-optimization-lib.git
+cd koog-auto-agent-optimization-lib
 ```
 
 The bundled example wires all of the above together. Run it with an LLM endpoint configured via
@@ -263,6 +263,6 @@ This executes `OptimizeWeatherAgentExample`, which builds the weather agent, opt
   subgraph-level optimization, and the multi-subgraph support-router walkthrough.
 - [Optimizers](optimizers.md) — reference for the other three optimizers (GEPA, MIPROv2, ACE): what
   each learns, when to use it, and its constructor.
-- [Writing a custom optimizer](custom-optimizers.md) — the `AgentOptimizer` SPI and the `StageScope`
-  training DSL.
+- [Writing a custom optimizer](custom-optimizers.md) — the `AgentOptimizer` interface and the
+  `StageScope` training DSL.
 - [API reference](api/index.html) — full Dokka API docs.

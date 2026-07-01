@@ -60,7 +60,7 @@ publishing {
                     "Automatic optimization for Koog agents: make an agent optimizable and run " +
                         "optimizers (BootstrapFewShot, MIPRO, GEPA, ACE) over it.",
                 )
-                url.set("https://github.com/JetBrains/koog-auto-agent-optimization-package")
+                url.set("https://github.com/JetBrains/koog-auto-agent-optimization-lib")
                 licenses {
                     license {
                         name.set("The Apache License, Version 2.0")
@@ -74,7 +74,7 @@ publishing {
                     }
                 }
                 scm {
-                    url.set("https://github.com/JetBrains/koog-auto-agent-optimization-package")
+                    url.set("https://github.com/JetBrains/koog-auto-agent-optimization-lib")
                 }
             }
         }

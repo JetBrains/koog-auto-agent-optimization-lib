@@ -203,7 +203,7 @@ public class StageScopeImpl<Input, Output, InputLabel>(
                 // re-fire the abort. Recompute is needed so metrics see the just-added leaf.
                 recomputeMetricsAndUpdate(isStageUpdate = false)
             },
-            // The attempt seam installs any critical-tool-failure propagation and returns the
+            // The attempt hook installs any critical-tool-failure propagation and returns the
             // (possibly re-prepared) agent alongside its output.
             block = { _ -> resources.runAgentAttempt(agentToRun, item.userQuery) },
         )

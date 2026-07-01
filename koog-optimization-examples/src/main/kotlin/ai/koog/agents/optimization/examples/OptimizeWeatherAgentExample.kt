@@ -80,21 +80,32 @@ fun main() = runBlocking {
         serializers = serializers,
     )
 
-    // Optimize, then load the optimized agent and run it. BootstrapFewShot turns successful runs
-    // into few-shot demonstrations baked into the optimized agent's prompt.
+    // BootstrapFewShot turns successful runs into few-shot demonstrations baked into the optimized
+    // agent's prompt.
+    val storagePath = ResilientPath("build/example-artifacts/weather_fewshot.json")
     val optimizer = BootstrapFewShotOptimizer<String, String, Double>(
         maxBootstrappedDemos = 4,
         maxRounds = 1,
         maxTotalDemos = 4,
         includeLabeledExamples = true,
-        storagePath = ResilientPath("build/example-artifacts/weather_fewshot.json"),
+        storagePath = storagePath,
         randomSeed = 42,
     )
 
+    // Before: the unoptimized agent on a held-out question.
+    val heldOut = "What is the weather like right now? $outputHint"
+    println("=== BEFORE optimization ===")
+    println("Held-out question: $heldOut")
+    println("Baseline agent answered: ${agent.run(heldOut)}")
+
     optimizer.train(session)
+    println()
+    println("Learned artifact saved to ${storagePath.absolutePathString}")
+
+    // After: the optimized agent on the same question.
     val optimized = optimizer.loadOptimizedAgent(agent)
-    val answer = optimized.run("What is the weather like right now? $outputHint")
-    println("Optimized agent answered: $answer")
+    println("=== AFTER optimization ===")
+    println("Optimized agent answered: ${optimized.run(heldOut)}")
 }
 
 /** Mock weather toolset — returns a deterministic temperature inferred from the hour in the query. */

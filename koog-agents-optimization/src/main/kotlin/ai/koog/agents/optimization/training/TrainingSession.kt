@@ -21,8 +21,8 @@ import kotlinx.serialization.json.JsonElement
  * resulting records, and returns a [TrainingResult] (the same shape that is written to disk).
  *
  * All provider/settings wiring (agent tracking, consumption capture, spend limits, cluster progress)
- * is supplied through [resources] and the constructor seams; the app builds these via its
- * `TrainingSessionFactory`.
+ * is supplied through [resources] and the constructor's injected collaborators; the app builds these
+ * via its `TrainingSessionFactory`.
  */
 public class TrainingSession<Input, Output, InputLabel>(
     private val resources: TrainingResources<Input, Output, InputLabel>,

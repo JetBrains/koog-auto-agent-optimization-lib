@@ -21,9 +21,12 @@ public data class ExperimentName(
     @SerialName("submissionId")
     val submissionId: String? = null,
 
-    /** Name of the optimizer driving this run, or `null` when no optimizer is involved (e.g. plain evaluation). */
+    /**
+     * Name of the optimizer driving this run. Plain evaluation with no optimizer uses a descriptive
+     * name instead (e.g. `"Baseline (no optimizer)"`), so this is always set.
+     */
     @SerialName("optimizer")
-    val optimizerName: String?,
+    val optimizerName: String,
 
     /** Name of the agent under experiment. */
     @SerialName("agent")
