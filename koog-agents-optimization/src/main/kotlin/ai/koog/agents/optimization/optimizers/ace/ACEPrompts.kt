@@ -1,9 +1,9 @@
 package ai.koog.agents.optimization.optimizers.ace
 
 
+import ai.koog.agents.optimization.utils.agentic.prettyPrint
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.dsl.prompt
-import ai.koog.agents.optimization.utils.agentic.prettyPrint
 import kotlinx.serialization.json.Json
 
 /** Prompt builders for the ACE reflector and curator stages, and for injecting the playbook at run time. */

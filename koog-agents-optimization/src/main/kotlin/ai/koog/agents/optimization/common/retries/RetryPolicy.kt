@@ -3,6 +3,8 @@ package ai.koog.agents.optimization.common.retries
 
 import ai.koog.agents.optimization.common.AnalyzedFailure
 import ai.koog.agents.optimization.common.TransiencyLevel
+import ai.koog.agents.optimization.common.retries.UnknownFailurePolicy.CONSERVATIVE
+import ai.koog.agents.optimization.common.retries.UnknownFailurePolicy.LENIENT
 import kotlin.math.pow
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds

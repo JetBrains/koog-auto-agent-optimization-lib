@@ -1,7 +1,7 @@
 package ai.koog.agents.optimization.consumption
 
 import kotlinx.serialization.json.JsonObject
-import java.util.ServiceLoader
+import java.util.*
 
 /**
  * Resolves consumption flavors discovered on the classpath via [LLMConsumptionType] services.

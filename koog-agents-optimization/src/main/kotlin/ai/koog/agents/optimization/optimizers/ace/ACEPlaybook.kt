@@ -1,6 +1,7 @@
 package ai.koog.agents.optimization.optimizers.ace
 
 
+import ai.koog.agents.optimization.optimizers.ace.PlaybookBulletItem.Companion.generateNewId
 import ai.koog.agents.optimization.utils.common.ResilientPath
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.Serializable

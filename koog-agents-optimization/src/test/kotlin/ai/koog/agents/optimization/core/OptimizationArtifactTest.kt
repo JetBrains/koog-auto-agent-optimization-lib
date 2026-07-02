@@ -1,7 +1,5 @@
 package ai.koog.agents.optimization.core
 
-import ai.koog.agents.optimization.core.Demonstration
-import ai.koog.agents.optimization.core.OptimizationArtifact
 import kotlinx.serialization.json.Json
 import kotlin.test.Test
 import kotlin.test.assertEquals

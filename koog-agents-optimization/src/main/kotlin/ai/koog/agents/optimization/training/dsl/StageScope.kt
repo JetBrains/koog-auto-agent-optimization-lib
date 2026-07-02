@@ -2,14 +2,13 @@
 
 package ai.koog.agents.optimization.training.dsl
 
-import ai.koog.agents.optimization.annotations.OptimizationExtensionApi
-
 import ai.koog.agents.core.agent.GraphAIAgent
-import ai.koog.prompt.dsl.Prompt
-import ai.koog.prompt.llm.LLModel
-import ai.koog.prompt.message.Message
+import ai.koog.agents.optimization.annotations.OptimizationExtensionApi
 import ai.koog.agents.optimization.common.defaultExperimentsJson
 import ai.koog.agents.optimization.common.retries.RetryPolicy
+import ai.koog.agents.optimization.optimizers.TrainSet
+import ai.koog.agents.optimization.optimizers.TrainSetItem
+import ai.koog.agents.optimization.training.CapturingPromptExecutor
 import ai.koog.agents.optimization.training.PrematureExecutionStopDecision
 import ai.koog.agents.optimization.training.metrics.MetricsMap
 import ai.koog.agents.optimization.training.metrics.impl.Metric
@@ -17,10 +16,10 @@ import ai.koog.agents.optimization.training.metrics.standardStageMetrics
 import ai.koog.agents.optimization.training.records.PromptExecutionRecord
 import ai.koog.agents.optimization.training.records.StageRecord
 import ai.koog.agents.optimization.training.structures.StageFailedException
-import ai.koog.agents.optimization.training.CapturingPromptExecutor
-import ai.koog.agents.optimization.optimizers.TrainSet
-import ai.koog.agents.optimization.optimizers.TrainSetItem
 import ai.koog.agents.optimization.utils.llm.executeStructuredOrThrow
+import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.Message
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.encodeToJsonElement

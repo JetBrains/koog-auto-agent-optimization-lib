@@ -1,8 +1,8 @@
 package ai.koog.agents.optimization.optimizers.gepa
 
 
-import ai.koog.prompt.dsl.Prompt
 import ai.koog.agents.optimization.core.OptimizableModule
+import ai.koog.prompt.dsl.Prompt
 import io.github.oshai.kotlinlogging.KotlinLogging
 
 private val logger = KotlinLogging.logger {}

@@ -7,21 +7,12 @@ import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.builder.subgraph
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.agents.ext.agent.subgraphWithTask
-import ai.koog.agents.optimization.core.OptimizableModule
-import ai.koog.agents.optimization.core.STRATEGY_MODULE_KEY
-import ai.koog.agents.optimization.core.discoverModules
-import ai.koog.agents.optimization.core.optimizableSubgraphWithTask
 import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.serialization.typeToken
-import kotlin.test.Test
-import kotlin.test.assertContains
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
+import kotlin.test.*
 
 /**
  * Tests for `discoverModules` covering two bugs that previously masked the user's

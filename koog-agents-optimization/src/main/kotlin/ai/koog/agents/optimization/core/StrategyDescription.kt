@@ -1,11 +1,6 @@
 package ai.koog.agents.optimization.core
 
-import ai.koog.agents.core.agent.entity.AIAgentGraphStrategy
-import ai.koog.agents.core.agent.entity.AIAgentNode
-import ai.koog.agents.core.agent.entity.AIAgentNodeBase
-import ai.koog.agents.core.agent.entity.AIAgentSubgraph
-import ai.koog.agents.core.agent.entity.FinishNode
-import ai.koog.agents.core.agent.entity.StartNode
+import ai.koog.agents.core.agent.entity.*
 
 /**
  * Creates a text description of the strategy structure for use in MIPRO instruction proposal.

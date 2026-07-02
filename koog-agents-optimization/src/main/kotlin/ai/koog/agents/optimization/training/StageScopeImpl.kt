@@ -1,14 +1,15 @@
 package ai.koog.agents.optimization.training
 
-import ai.koog.agents.optimization.annotations.OptimizationExtensionApi
-
 import ai.koog.agents.core.agent.GraphAIAgent
+import ai.koog.agents.optimization.annotations.OptimizationExtensionApi
 import ai.koog.agents.optimization.common.abort.AbortController
 import ai.koog.agents.optimization.common.abort.ExecutionAbortException
 import ai.koog.agents.optimization.common.retries.AttemptMetrics
 import ai.koog.agents.optimization.common.retries.RetriesOutcome
 import ai.koog.agents.optimization.common.retries.RetryPolicy
 import ai.koog.agents.optimization.common.retries.retryWith
+import ai.koog.agents.optimization.optimizers.TrainSet
+import ai.koog.agents.optimization.optimizers.TrainSetItem
 import ai.koog.agents.optimization.training.dsl.*
 import ai.koog.agents.optimization.training.metrics.MetricsMap
 import ai.koog.agents.optimization.training.metrics.datasetIterationMetrics
@@ -19,8 +20,6 @@ import ai.koog.agents.optimization.training.records.AgentRunRecord
 import ai.koog.agents.optimization.training.records.PromptExecutionRecord
 import ai.koog.agents.optimization.training.records.StageRecord
 import ai.koog.agents.optimization.training.structures.*
-import ai.koog.agents.optimization.optimizers.TrainSet
-import ai.koog.agents.optimization.optimizers.TrainSetItem
 import ai.koog.agents.optimization.utils.serialization.LLMConsumptionOrNA
 import io.github.oshai.kotlinlogging.KLogger
 import kotlinx.serialization.json.Json

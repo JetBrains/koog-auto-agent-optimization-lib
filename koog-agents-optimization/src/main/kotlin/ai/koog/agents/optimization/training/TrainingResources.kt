@@ -2,12 +2,12 @@ package ai.koog.agents.optimization.training
 
 
 import ai.koog.agents.core.agent.GraphAIAgent
-import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.agents.optimization.common.DatasetExecutionSerializers
 import ai.koog.agents.optimization.common.retries.RetryPolicy
 import ai.koog.agents.optimization.consumption.LLMConsumption
 import ai.koog.agents.optimization.optimizers.TrainSet
 import ai.koog.agents.optimization.optimizers.TrainSetItem
+import ai.koog.prompt.executor.model.PromptExecutor
 
 /**
  * Shared execution resources created once per training session.

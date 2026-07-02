@@ -35,7 +35,7 @@ serializers, and call `trainingSession(...)`), then pick an optimizer below.
 
     **ACE optimizer deviates the most.** Its current implementation differs from the original
     algorithm in ways that can affect results. Treat it, and other optimizers, as
-    early, and validate on your own task before relying on them. Closing the gap is future work.
+    experimental, and validate on your own task before relying on them. Closing the gap is future work.
 
     | Optimizer | Original authors | Reference |
     |---|---|---|

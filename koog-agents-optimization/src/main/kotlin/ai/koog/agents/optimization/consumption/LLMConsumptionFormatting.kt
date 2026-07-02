@@ -1,6 +1,6 @@
 package ai.koog.agents.optimization.consumption
 
-import java.util.Locale
+import java.util.*
 
 /**
  * Format an amount as `"N,NNN.NN <shortLabel>"` (e.g. `"12,345.67 tokens"`), or `"n/a"` for null.

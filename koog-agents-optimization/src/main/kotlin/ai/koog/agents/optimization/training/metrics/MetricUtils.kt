@@ -1,12 +1,12 @@
 package ai.koog.agents.optimization.training.metrics
 
 
+import ai.koog.agents.optimization.consumption.LLMConsumption
 import ai.koog.agents.optimization.training.metrics.impl.ConsumptionMetric
 import ai.koog.agents.optimization.training.metrics.impl.ElapsedTimeMetric
 import ai.koog.agents.optimization.training.metrics.impl.Metric
 import ai.koog.agents.optimization.training.metrics.impl.RetryStatsMetric
 import ai.koog.agents.optimization.training.records.*
-import ai.koog.agents.optimization.consumption.LLMConsumption
 import ai.koog.agents.optimization.utils.serialization.LLMConsumptionOrNA
 import ai.koog.agents.optimization.utils.serialization.sumConsumptions
 import kotlin.time.Duration

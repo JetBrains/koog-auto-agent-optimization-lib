@@ -1,15 +1,15 @@
 package ai.koog.agents.optimization.utils.llm
 
 
+import ai.koog.agents.optimization.utils.common.mapError
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.executor.model.PromptExecutor
+import ai.koog.prompt.executor.model.executeStructured
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.structure.StructuredRequest
 import ai.koog.prompt.structure.StructuredRequestConfig
-import ai.koog.prompt.executor.model.executeStructured
 import ai.koog.prompt.structure.json.JsonStructure
 import ai.koog.prompt.structure.json.generator.StandardJsonSchemaGenerator
-import ai.koog.agents.optimization.utils.common.mapError
 
 /**
  * Executes [prompt] against [model], requesting a structured response of type [OutputStructT], and

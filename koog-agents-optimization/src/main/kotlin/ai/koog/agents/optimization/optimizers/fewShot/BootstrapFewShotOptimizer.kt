@@ -1,8 +1,6 @@
 package ai.koog.agents.optimization.optimizers.fewShot
 
 
-import ai.koog.agents.optimization.training.records.TrainingResult
-
 import ai.koog.agents.core.agent.GraphAIAgent
 import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.optimization.core.Demonstration
@@ -10,14 +8,15 @@ import ai.koog.agents.optimization.core.DemonstrationRenderer
 import ai.koog.agents.optimization.core.OptimizationArtifact
 import ai.koog.agents.optimization.features.collectSubgraphTraces
 import ai.koog.agents.optimization.features.installPromptOptimization
-import ai.koog.agents.optimization.training.PrematureExecutionStopDecision
-import ai.koog.agents.optimization.training.TrainingSession
-import ai.koog.agents.optimization.training.dsl.PreparedAgentRun
-import ai.koog.agents.optimization.training.dsl.RunUntil
 import ai.koog.agents.optimization.koogTooling.copyWith
 import ai.koog.agents.optimization.koogTooling.getCollectedTraces
 import ai.koog.agents.optimization.optimizers.AgentOptimizer
 import ai.koog.agents.optimization.optimizers.TrainSetItem
+import ai.koog.agents.optimization.training.PrematureExecutionStopDecision
+import ai.koog.agents.optimization.training.TrainingSession
+import ai.koog.agents.optimization.training.dsl.PreparedAgentRun
+import ai.koog.agents.optimization.training.dsl.RunUntil
+import ai.koog.agents.optimization.training.records.TrainingResult
 import ai.koog.agents.optimization.utils.common.ResilientPath
 import ai.koog.agents.optimization.utils.common.toFilePathLog
 import io.github.oshai.kotlinlogging.KotlinLogging

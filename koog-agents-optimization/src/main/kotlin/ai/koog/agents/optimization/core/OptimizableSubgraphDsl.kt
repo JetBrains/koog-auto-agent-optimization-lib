@@ -13,11 +13,10 @@ import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.ext.agent.SubgraphWithTaskUtils
 import ai.koog.agents.ext.agent.setupSubgraphWithTask
 import ai.koog.prompt.llm.LLModel
-import ai.koog.serialization.typeToken
 import ai.koog.prompt.params.LLMParams
 import ai.koog.prompt.processor.ResponseProcessor
-import java.util.Collections
-import java.util.WeakHashMap
+import ai.koog.serialization.typeToken
+import java.util.*
 import kotlin.reflect.KProperty
 
 /**

@@ -2,10 +2,10 @@ package ai.koog.agents.optimization.training.metrics.impl
 
 
 import ai.koog.agents.optimization.common.results.ConsumptionWithRetries
+import ai.koog.agents.optimization.consumption.LLMConsumption
 import ai.koog.agents.optimization.training.metrics.*
 import ai.koog.agents.optimization.training.records.StageRecord
 import ai.koog.agents.optimization.training.records.TrainingRecord
-import ai.koog.agents.optimization.consumption.LLMConsumption
 import ai.koog.agents.optimization.utils.serialization.ConsumptionMetricSerializer
 import ai.koog.agents.optimization.utils.serialization.LLMConsumptionOrNA
 import kotlinx.serialization.SerialName

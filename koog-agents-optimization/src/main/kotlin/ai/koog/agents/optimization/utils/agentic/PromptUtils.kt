@@ -1,9 +1,9 @@
 package ai.koog.agents.optimization.utils.agentic
 
 
+import ai.koog.agents.core.dsl.builder.AIAgentNodeDelegate
 import ai.koog.agents.core.dsl.builder.AIAgentSubgraphBuilderBase
 import ai.koog.agents.core.dsl.builder.node
-import ai.koog.agents.core.dsl.builder.AIAgentNodeDelegate
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.message.Message

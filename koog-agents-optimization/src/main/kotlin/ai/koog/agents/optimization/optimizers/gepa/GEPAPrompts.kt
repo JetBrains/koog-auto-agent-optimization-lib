@@ -1,9 +1,9 @@
 package ai.koog.agents.optimization.optimizers.gepa
 
 
+import ai.koog.agents.optimization.utils.agentic.prettyPrint
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.dsl.prompt
-import ai.koog.agents.optimization.utils.agentic.prettyPrint
 
 /**
  * Prompt templates used by GEPA's reflection LM for instruction proposal and crossover.

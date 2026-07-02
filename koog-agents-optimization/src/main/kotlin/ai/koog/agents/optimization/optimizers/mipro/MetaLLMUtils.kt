@@ -1,11 +1,11 @@
 package ai.koog.agents.optimization.optimizers.mipro
 
 
+import ai.koog.agents.optimization.training.dsl.StageScope
+import ai.koog.agents.optimization.training.dsl.executePrompt
 import ai.koog.prompt.dsl.Prompt
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
-import ai.koog.agents.optimization.training.dsl.StageScope
-import ai.koog.agents.optimization.training.dsl.executePrompt
 import io.github.oshai.kotlinlogging.KotlinLogging
 
 private val logger = KotlinLogging.logger {}

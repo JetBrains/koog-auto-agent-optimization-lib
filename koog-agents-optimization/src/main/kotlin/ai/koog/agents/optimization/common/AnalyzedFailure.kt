@@ -1,6 +1,7 @@
 package ai.koog.agents.optimization.common
 
 
+import ai.koog.agents.optimization.common.KnownResolvedIds.GEN_AI_AGENT_SPAN_CLEANUP
 import kotlinx.serialization.Serializable
 
 /**

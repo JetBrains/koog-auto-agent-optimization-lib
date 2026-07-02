@@ -1,23 +1,22 @@
 package ai.koog.agents.optimization.optimizers.ace
 
 
-import ai.koog.agents.optimization.training.records.TrainingResult
-
 import ai.koog.agents.core.agent.GraphAIAgent
 import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.tools.annotations.LLMDescription
 import ai.koog.agents.optimization.features.collectSubgraphTraces
-import ai.koog.prompt.llm.LLModel
-import ai.koog.agents.optimization.training.TrainingSession
-import ai.koog.agents.optimization.training.dsl.executePromptStructuredOrThrow
-import ai.koog.agents.optimization.training.dsl.runAgentOrThrow
 import ai.koog.agents.optimization.koogTooling.copyWith
 import ai.koog.agents.optimization.koogTooling.getCollectedTraces
 import ai.koog.agents.optimization.optimizers.AgentOptimizer
 import ai.koog.agents.optimization.optimizers.TrainSetItem
+import ai.koog.agents.optimization.training.TrainingSession
+import ai.koog.agents.optimization.training.dsl.executePromptStructuredOrThrow
+import ai.koog.agents.optimization.training.dsl.runAgentOrThrow
+import ai.koog.agents.optimization.training.records.TrainingResult
 import ai.koog.agents.optimization.utils.common.ResilientPath
 import ai.koog.agents.optimization.utils.common.koogJson
 import ai.koog.agents.optimization.utils.common.toFilePathLog
+import ai.koog.prompt.llm.LLModel
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable

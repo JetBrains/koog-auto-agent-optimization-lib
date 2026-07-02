@@ -1,8 +1,6 @@
 package ai.koog.agents.optimization.optimizers.gepa
 
 
-import ai.koog.agents.optimization.training.records.TrainingResult
-
 import ai.koog.agents.core.agent.GraphAIAgent
 import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.optimization.core.OptimizableModule
@@ -11,20 +9,21 @@ import ai.koog.agents.optimization.core.STRATEGY_MODULE_KEY
 import ai.koog.agents.optimization.core.discoverModules
 import ai.koog.agents.optimization.features.collectSubgraphTraces
 import ai.koog.agents.optimization.features.installPromptOptimization
-import ai.koog.prompt.llm.LLModel
-import ai.koog.prompt.message.Message
-import ai.koog.agents.optimization.training.TrainingSession
-import ai.koog.agents.optimization.training.dsl.StageScope
-import ai.koog.agents.optimization.training.dsl.executePromptOrThrow
-import ai.koog.agents.optimization.training.dsl.runIterableStageOrThrow
-import ai.koog.agents.optimization.training.dsl.runStageOrThrow
 import ai.koog.agents.optimization.koogTooling.copyWith
 import ai.koog.agents.optimization.koogTooling.getCollectedTraces
 import ai.koog.agents.optimization.optimizers.AgentOptimizer
 import ai.koog.agents.optimization.optimizers.TrainSet
 import ai.koog.agents.optimization.optimizers.TrainSetItem
+import ai.koog.agents.optimization.training.TrainingSession
+import ai.koog.agents.optimization.training.dsl.StageScope
+import ai.koog.agents.optimization.training.dsl.executePromptOrThrow
+import ai.koog.agents.optimization.training.dsl.runIterableStageOrThrow
+import ai.koog.agents.optimization.training.dsl.runStageOrThrow
+import ai.koog.agents.optimization.training.records.TrainingResult
 import ai.koog.agents.optimization.utils.common.ResilientPath
 import ai.koog.agents.optimization.utils.common.toFilePathLog
+import ai.koog.prompt.llm.LLModel
+import ai.koog.prompt.message.Message
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.Json
 import kotlin.random.Random

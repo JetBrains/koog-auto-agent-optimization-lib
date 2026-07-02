@@ -1,8 +1,7 @@
 package ai.koog.agents.optimization.utils.serialization
 
-import ai.koog.agents.optimization.consumption.LLMConsumptionSerializer
-
 import ai.koog.agents.optimization.consumption.LLMConsumption
+import ai.koog.agents.optimization.consumption.LLMConsumptionSerializer
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -11,7 +10,9 @@ import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
 import kotlinx.serialization.descriptors.SerialDescriptor
 import kotlinx.serialization.encoding.Decoder
 import kotlinx.serialization.encoding.Encoder
-import kotlinx.serialization.json.*
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * A wrapper class to serialize nullable consumption properly.
