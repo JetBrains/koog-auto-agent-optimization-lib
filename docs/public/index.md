@@ -114,3 +114,4 @@ explained step by step — is in [getting-started.md](getting-started.md).
 - [API reference](api/index.html) — generated API docs.
 - **Runnable examples** — live in the `:koog-optimization-examples` module of the
   [source repository](https://github.com/JetBrains/koog-auto-agent-optimization-lib); clone it to run them.
+- [benchmarks.md](benchmarks.md) — GEPA replication results on six benchmarks.
