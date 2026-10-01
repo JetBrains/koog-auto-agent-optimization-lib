@@ -50,7 +50,7 @@ serializers, and call `trainingSession(...)`), then pick an optimizer below.
 |---|---|---|---|
 | **BootstrapFewShot** | few-shot demonstrations mined from successful runs | quick wins when you already have good runs to mine | optional — judged by the metric |
 | **MIPROv2** | instructions + demos, via proposal and search | when you want both instruction tuning and demos | optional — judged by the metric |
-| **GEPA** | module instructions, via reflective evolution over a Pareto frontier | ambiguous or underspecified instructions; instruction-only | yes — via a `labelExtractor` (string label) |
+| **GEPA** | module instructions, via reflective evolution over a Pareto frontier | ambiguous or underspecified instructions; instruction-only | yes — via `gepaFeedback` |
 | **ACE** | an evolving "playbook" of insights appended to the system prompt | accumulating reusable strategy and knowledge | yes — via a `labelExtractor` (string label) |
 
 For models, the examples below use `OpenAIModels.Chat.GPT4oMini` as the example
@@ -135,6 +135,12 @@ Key params:
   even though it sits after defaulted params.
 - `parallelism` — concurrent runs during bootstrapping.
 
+A run records its search into the training records: the modules it found and the size of each dataset
+split, the size of every generated demo set, every proposed instruction, and, for each trial, the
+candidate indices it drew alongside its score. `Step 3: Grid Search` names the trial the run kept, so
+the saved artifact can be traced back to the combination that produced it. Long values are clipped to
+`TrainingResources.actionLogTruncation`, which a run can raise to keep more of them; the run log carries each proposed instruction in full.
+
 ```kotlin
 import ai.koog.agents.optimization.optimizers.mipro.MIPROv2Optimizer
 import ai.koog.agents.optimization.optimizers.mipro.AutoRunMode
@@ -155,50 +161,94 @@ val answer = optimized.run("What is the weather at 14:00? Answer with a single n
 ## GEPA
 
 Instruction-only. GEPA evolves module instructions with reflective LLM feedback
-over failure traces, maintaining a Pareto frontier of candidates and optionally
+over agent traces, maintaining a Pareto frontier of candidates and optionally
 merging complementary ones (crossover).
 
 ```kotlin
 GEPAOptimizer<Input, Output, InputLabel>(
+    gepaFeedback: GEPAFeedback<Input, Output, InputLabel>,
+    feedbackValSplitFn: (TrainSet<Input, InputLabel>) -> GEPATrainSetSplit<Input, InputLabel>,
     reflectionModel: LLModel,
     storagePath: ResilientPath,
-    maxIterations: Int,
-    minibatchSize: Int,
-    componentSelection: ComponentSelection,   // ROUND_ROBIN | ALL_AT_ONCE
-    enableCrossover: Boolean,
-    maxMergeInvocations: Int = 5,
+    numRollouts: Int,
+    feedbackBatchSize: Int = 3,
+    skipPerfectFeedbackBatches: Boolean = true,
+    perfectScoreThreshold: Double = 1.0,
     randomSeed: Long = 42,
-    labelExtractor: (TrainSetItem<Input, InputLabel>) -> String,
+    moduleSelectionStrategy: GEPAModuleSelectionStrategy = GEPAModuleSelectionStrategy.ROUND_ROBIN,
+    useStructuredOutput: Boolean = false,
+    requireThinkingFieldInOutput: Boolean = false,
+    mergeConfig: GEPAMergeConfig = GEPAMergeConfig(),
+    failureScore: Double = 0.0,
+    feedbackFailureRateThreshold: Double = 1.0,
+    validationFailureRateThreshold: Double = 0.9,
+    seedValidationFailureRateThreshold: Double = 0.0,
+    abortOnFailureRateExceeded: Boolean = true,
 )
 ```
 
 Key params:
 
 - `reflectionModel` — the LLM that reflects on traces and proposes new instructions.
-- `maxIterations` / `minibatchSize` — the evolution budget: how many iterations,
-  and how many items are sampled per iteration for reflection.
-- `componentSelection` — which optimizable modules to update each iteration.
-  `ROUND_ROBIN` updates one module at a time in rotation; `ALL_AT_ONCE` updates
+- `numRollouts` — the required total rollout budget. It includes the initial validation-set
+  evaluation and must be greater than the validation-set size; otherwise GEPA would have no budget
+  left for optimization. A practical starting point is **6–20× the input training dataset size**.
+- `feedbackBatchSize` — the number of feedback items sampled per reflection attempt.
+- `moduleSelectionStrategy` — which optimizable modules to update each iteration.
+  `ROUND_ROBIN` updates one module at a time in rotation; `ALL` updates
   every module each iteration.
-- `enableCrossover` / `maxMergeInvocations` — whether to merge complementary
-  candidates, and the cap on merge attempts per run.
-- `labelExtractor` — converts a dataset item's label into the string the
-  reflection LM sees as the expected answer. Required.
+- `mergeConfig` — whether and how to merge complementary candidates.
+  **Experimental**: tests reach its proposal step and no further, merging has never run end to end, and it may diverge from GEPA's original implementation more significantly.
+  Merging also needs an agent with at least two optimizable modules — it combines the module one lineage changed with the module the other changed, so enabling it for a single-module agent does nothing.
+- `failureScore` — score assigned when an agent rollout still fails after retries.
+- `feedbackFailureRateThreshold` — maximum failed-item ratio in parent and candidate feedback
+  batches. The default `1.0` disables the cap: a failed parent batch is skipped, while failed
+  candidate rollouts retain `failureScore` in the acceptance average.
+- `validationFailureRateThreshold` — maximum failed-item ratio in candidate validation runs.
+  With `abortOnFailureRateExceeded` enabled, exceeding it terminates the entire optimization.
+- `seedValidationFailureRateThreshold` — maximum failed-item ratio in the initial seed validation.
+  With aborting enabled, the default `0.0` stops after the first failure, preventing an
+  artificially weak baseline.
+- `abortOnFailureRateExceeded` — whether exceeding any rollout failure-rate threshold aborts GEPA.
+  When `false`, GEPA evaluates the full rollout set and records threshold breaches without terminating
+  the optimization; terminal agent failures still receive `failureScore`.
+
+Thresholds use a strict `>` comparison: `0.0` permits no failures, while `1.0` disables the cap.
+Failed rollout items remain visible as failed stages in the training record even when their rollout
+set stays within its configured threshold.
+
+A run records its search into the training records: the seed and every accepted candidate with their
+validation scores and parents, each batch's parent, module, scores and outcome, and every proposed
+instruction. Long values are clipped to `TrainingResources.actionLogTruncation`, which a run can raise
+to keep more of them; the run log carries each proposed instruction in full.
 
 ```kotlin
 import ai.koog.agents.optimization.optimizers.gepa.GEPAOptimizer
-import ai.koog.agents.optimization.optimizers.gepa.ComponentSelection
+import ai.koog.agents.optimization.optimizers.gepa.GEPAModuleSelectionStrategy
+import ai.koog.agents.optimization.optimizers.gepa.GEPATrainSetSplit
+import ai.koog.agents.optimization.optimizers.gepa.strategyOnlyGepaFeedback
 import ai.koog.agents.optimization.utils.common.ResilientPath
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 
-val optimizer = GEPAOptimizer<String, String, Double>(
+val optimizer = GEPAOptimizer<String, String, String>(
+    gepaFeedback = strategyOnlyGepaFeedback { input, output, gold, _, _ ->
+        val score = if (output == gold) 1.0 else 0.0
+        score to if (score == 1.0) "Solved." else "Expected '$gold', got '$output'."
+    },
+    feedbackValSplitFn = { items ->
+        val splitAt = items.size / 2
+        GEPATrainSetSplit(feedbackSet = items.take(splitAt), validationSet = items.drop(splitAt))
+    },
     reflectionModel = OpenAIModels.Chat.GPT4oMini,
     storagePath = ResilientPath("build/artifacts/gepa.json"),
-    maxIterations = 10,
-    minibatchSize = 5,
-    componentSelection = ComponentSelection.ROUND_ROBIN,
-    enableCrossover = true,
-    labelExtractor = { item -> item.itemLabel.toString() },
+    numRollouts = 100,
+    feedbackBatchSize = 3,
+    moduleSelectionStrategy = GEPAModuleSelectionStrategy.ROUND_ROBIN,
+    failureScore = 0.0,
+    feedbackFailureRateThreshold = 1.0,
+    validationFailureRateThreshold = 0.9,
+    seedValidationFailureRateThreshold = 0.0,
+    abortOnFailureRateExceeded = true,
 )
 
 optimizer.train(session)

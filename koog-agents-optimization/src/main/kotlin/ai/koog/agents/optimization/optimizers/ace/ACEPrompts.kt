@@ -2,7 +2,7 @@ package ai.koog.agents.optimization.optimizers.ace
 
 
 import ai.koog.agents.optimization.utils.agentic.prettyPrint
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.dsl.prompt
 import kotlinx.serialization.json.Json
 

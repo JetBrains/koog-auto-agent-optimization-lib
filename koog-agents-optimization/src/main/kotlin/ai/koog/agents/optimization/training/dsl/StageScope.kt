@@ -4,10 +4,12 @@ package ai.koog.agents.optimization.training.dsl
 
 import ai.koog.agents.core.agent.GraphAIAgent
 import ai.koog.agents.optimization.annotations.OptimizationExtensionApi
+import ai.koog.agents.optimization.common.abort.ExecutionAbortException
 import ai.koog.agents.optimization.common.defaultExperimentsJson
 import ai.koog.agents.optimization.common.retries.RetryPolicy
 import ai.koog.agents.optimization.optimizers.TrainSet
 import ai.koog.agents.optimization.optimizers.TrainSetItem
+import ai.koog.agents.optimization.training.ActionLogTruncation
 import ai.koog.agents.optimization.training.CapturingPromptExecutor
 import ai.koog.agents.optimization.training.PrematureExecutionStopDecision
 import ai.koog.agents.optimization.training.metrics.MetricsMap
@@ -17,7 +19,7 @@ import ai.koog.agents.optimization.training.records.PromptExecutionRecord
 import ai.koog.agents.optimization.training.records.StageRecord
 import ai.koog.agents.optimization.training.structures.StageFailedException
 import ai.koog.agents.optimization.utils.llm.executeStructuredOrThrow
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.message.Message
 import kotlinx.serialization.json.Json
@@ -46,6 +48,25 @@ public interface StageScope<Input, Output, InputLabel> {
 
     /** The full training dataset, used as the default for [iterateDataset]. */
     public val dataset: TrainSet<Input, InputLabel>
+
+    /**
+     * The session's failed-item ratio above which a dataset iteration is marked as failed, used as
+     * the default for [iterateDataset]. `null` tolerates any failure rate.
+     */
+    public val datasetFailureRateThreshold: Double?
+
+    // ===================================================================
+    // Execution abort
+    // ===================================================================
+
+    /**
+     * Aborts the entire training session with the exception supplied by [produceException].
+     *
+     * This is the optimizer-facing entry point to the session's shared one-shot abort controller.
+     * The first call throws the produced [ExecutionAbortException]; later calls are no-ops and do
+     * not invoke [produceException]. DSL stage boundaries record and rethrow the abort unchanged.
+     */
+    public fun abortExecution(produceException: () -> ExecutionAbortException)
 
     // ===================================================================
     // Nested stage (tree node)
@@ -149,6 +170,10 @@ public interface StageScope<Input, Output, InputLabel> {
      * retry layer has already absorbed transient blips). Per-attempt detail for retried operations
      * lives in the resulting record's `previousAttempts`.
      *
+     * Logging from inside the block: [execute] runs within the current stage, so [logAction] and
+     * [appendToActionLog] are in scope there and write that stage's action log. Use them when the work
+     * around the call produces a fact worth keeping in the records.
+     *
      * Generally, it's better to use more clean variants like [executePrompt] or [executePromptStructured].
      *
      * @param retryPolicy override for the session-default retry policy. `null` (default) =
@@ -165,8 +190,26 @@ public interface StageScope<Input, Output, InputLabel> {
     // Logging and custom metrics
     // ===================================================================
 
-    /** Builds an action log via the [ActionLogBuilder] DSL and stores it on the current stage record. */
+    /**
+     * Builds an action log via the [ActionLogBuilder] DSL and stores it on the current stage record.
+     *
+     * Records the decision this stage made and the inputs that decided it: scores, counts, flags, the
+     * option chosen, the reason a path was skipped. A produced artifact belongs here too when the stage
+     * might discard it. Long values are clipped to the session's [ActionLogTruncation],
+     * so write the full value to the run log as well when it has to be replayable.
+     *
+     * Replaces the stage's action log, warning when one is already there. A stage whose facts arrive at
+     * different times, or whose exit paths each record something, should use [appendToActionLog] instead.
+     */
     public fun logAction(json: Json = defaultExperimentsJson, builder: ActionLogBuilder.() -> Unit)
+
+    /**
+     * Merges the built entries into the current stage's action log, keeping the entries already there.
+     *
+     * A key written twice keeps the last value and warns. Truncation applies to each call, so the bound
+     * described on [logAction] holds here too.
+     */
+    public fun appendToActionLog(json: Json = defaultExperimentsJson, builder: ActionLogBuilder.() -> Unit)
 
     /**
      * Attaches a custom metric to the records tree of this stage. This method has two uses:
@@ -202,14 +245,15 @@ public interface StageScope<Input, Output, InputLabel> {
      * @param dataset The dataset to iterate over. Default: the entire training dataset.
      * @param customMetricsToRecord A list of custom metrics to aggregate from dataset item stages.
      * @param failureRateThreshold If the failure rate exceeds this value, the entire dataset iteration will be
-     *   marked as failed (but it will NOT throw).
+     *   marked as failed (but it will NOT throw). Defaults to the session's
+     *   [datasetFailureRateThreshold]; `null` tolerates any failure rate.
      * @param earlyStop A lambda that checks if the dataset iteration can be stopped prematurely.
      */
     public suspend fun iterateDataset(
         name: String = "Dataset iteration",
         dataset: TrainSet<Input, InputLabel> = this@StageScope.dataset,
         customMetricsToRecord: List<Metric>? = null,
-        failureRateThreshold: Double = 0.9,
+        failureRateThreshold: Double? = this@StageScope.datasetFailureRateThreshold,
         earlyStop: (TrainSetItem<Input, InputLabel>) -> PrematureExecutionStopDecision = {
             PrematureExecutionStopDecision(false) { "Unreachable: this training never stops prematurely" }
         },
@@ -224,7 +268,7 @@ public interface StageScope<Input, Output, InputLabel> {
 /**
  * Executes an LLM prompt with consumption tracking.
  * Creates a PromptExecutionRecord as a leaf record, recording elapsed time and consumption.
- * On success, returns the raw LLM response messages.
+ * On success, returns the raw LLM response message.
  *
  * Transient-failure retries are applied automatically per the session's retry policy — see
  * [StageScope.executeWithTrackedPromptExecutor].
@@ -236,7 +280,7 @@ public interface StageScope<Input, Output, InputLabel> {
 public suspend fun StageScope<*, *, *>.executePrompt(
     prompt: Prompt, model: LLModel,
     retryPolicy: RetryPolicy? = null,
-): Result<List<Message.Response>> =
+): Result<Message.Assistant> =
     executeWithTrackedPromptExecutor(name = prompt.id, retryPolicy = retryPolicy) {
         execute(prompt, model)
     }
@@ -289,7 +333,7 @@ public suspend fun <Input, Output, InputLabel> StageScope<Input, Output, InputLa
 public suspend fun StageScope<*, *, *>.executePromptOrThrow(
     prompt: Prompt, model: LLModel,
     retryPolicy: RetryPolicy? = null,
-): List<Message.Response> = executePrompt(prompt, model, retryPolicy).getOrThrow()
+): Message.Assistant = executePrompt(prompt, model, retryPolicy).getOrThrow()
 
 /** `.getOrThrow()` shortcut over [executePromptStructured]; throws on a recorded execution failure. */
 @OptimizationExtensionApi
@@ -301,6 +345,20 @@ public suspend inline fun <reified T> StageScope<*, *, *>.executePromptStructure
 // ===================================================================
 // Extra extensions
 // ===================================================================
+
+/**
+ * Records one fact on the current stage's action log, keeping the entries already there.
+ *
+ * Following [StageScope.appendToActionLog], an entry already recorded under [key] is overwritten and
+ * the overwrite is logged as a warning.
+ *
+ * Encodes [value] as a JSON element, so any `@Serializable` type works. For several facts at once,
+ * or for [ActionLogBuilder]'s typed overloads, use [StageScope.appendToActionLog] directly.
+ */
+@OptimizationExtensionApi
+public inline fun <reified T> StageScope<*, *, *>.putEntryToActionLog(key: String, value: T) {
+    appendToActionLog { put(key, value) }
+}
 
 /**
  * Serializes [data] with [defaultExperimentsJson] and stores it as this stage's additional data

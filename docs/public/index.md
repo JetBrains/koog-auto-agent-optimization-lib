@@ -17,30 +17,25 @@ This package allows you to automatically optimize [Koog](https://docs.koog.ai) a
 
 ## Install
 
-!!! warning "Prerequisite: install the Koog fork"
+!!! note "Not on Maven Central yet"
 
-    This library currently depends on a **fork of Koog** that adds optimizable-subgraph support
-    (`ai.koog:koog-agents:0.8.0-SNAPSHOT`), not the upstream release. Publish the fork to your local
-    Maven repository **before** building:
+    This library is not published to Maven Central yet — publish it to your local Maven repository
+    and depend on it from there:
 
     ```bash
-    git clone https://github.com/valemore/koog.git
-    cd koog
-    git checkout tags/stable-agent-optimization
-    ./gradlew publishToMavenLocal
+    git clone https://github.com/JetBrains/koog-auto-agent-optimization-lib.git
+    cd koog-auto-agent-optimization-lib
+    ./gradlew :koog-agents-optimization:publishToMavenLocal
     ```
 
-    This support is expected to land upstream in [JetBrains/koog](https://github.com/JetBrains/koog)
-    eventually, after which the fork won't be needed.
-
-Then add the dependencies. Both this library and the Koog fork resolve from `mavenLocal()`:
+Then add the dependencies:
 
 ```kotlin
 repositories { mavenLocal(); mavenCentral() }
 
 dependencies {
-    implementation("ai.koog:koog-agents-optimization:0.1.0-SNAPSHOT")
-    implementation("ai.koog:koog-agents:0.8.0-SNAPSHOT") // the Koog fork (the agent you optimize is a Koog agent)
+    implementation("ai.koog:koog-agents-optimization:0.1.0-SNAPSHOT") // from mavenLocal
+    implementation("ai.koog:koog-agents:1.1.1") // the agent you optimize is a Koog agent
 }
 ```
 

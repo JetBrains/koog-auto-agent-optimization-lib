@@ -3,6 +3,7 @@ package ai.koog.agents.optimization.training.structures
 
 import ai.koog.agents.optimization.common.AnalyzedFailure
 import ai.koog.agents.optimization.common.FailureKind
+import ai.koog.agents.optimization.common.abort.DatasetFailureRateExceededAbortException
 import ai.koog.agents.optimization.common.abort.ExecutionAbortException
 import ai.koog.agents.optimization.training.FailureAnalyzer
 import ai.koog.agents.optimization.training.records.AgentRunRecord
@@ -52,8 +53,11 @@ public class StageFailedException(
  * cause (rate + threshold) so the recognizer can describe the abort without parsing a string.
  *
  * Recognized via a dedicated branch in `analyzeTrainingFailure` that maps it to [FailureKind.EXECUTION_ABORTED].
- * TODO: Make it an [ExecutionAbortException] once the behaviour of this failure is standardized and
- *       can reuse the abort logic.
+ * TODO: Complete the failure-rate feature. The threshold is already a session setting
+ *       (`TrainingResources.datasetFailureRateThreshold`), while the behaviour on a breach is fixed. What is left: a
+ *       session-level policy that unifies this record-only failure with [DatasetFailureRateExceededAbortException],
+ *       the early stop that trips as soon as a breach becomes unavoidable (inside GEPA today), a threshold for the
+ *       evaluation phase, and skipping the phases a breach has already invalidated.
  */
 public class DatasetMaxFailureRateExceededException(
     /** The observed per-item failure rate that tripped the limit. */

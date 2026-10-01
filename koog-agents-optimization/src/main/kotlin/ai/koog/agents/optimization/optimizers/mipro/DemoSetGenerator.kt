@@ -114,7 +114,7 @@ internal suspend fun <Input, Output, InputLabel> StageScope<Input, Output, Input
             params.mapIndexed { index, p ->
                 async {
                     semaphore.withPermit {
-                        logger.info { "  Starting shuffled bootstrap ${index + 1}/$shuffledCount (numDemos=${p.numDemos})..." }
+                        logger.info { "Starting shuffled bootstrap ${index + 1}/$shuffledCount (numDemos=${p.numDemos})..." }
                         val shuffledDataset = dataset.shuffled(Random(p.seed))
                         val artifact = runBootstrapInScope(
                             dataset = shuffledDataset,
@@ -124,7 +124,7 @@ internal suspend fun <Input, Output, InputLabel> StageScope<Input, Output, Input
                             randomSeed = p.seed,
                             iterationName = "Bootstrap (shuffled ${index + 1})",
                         )
-                        logger.info { "  Shuffled bootstrap ${index + 1}/$shuffledCount completed" }
+                        logger.info { "Shuffled bootstrap ${index + 1}/$shuffledCount completed" }
                         artifact
                     }
                 }

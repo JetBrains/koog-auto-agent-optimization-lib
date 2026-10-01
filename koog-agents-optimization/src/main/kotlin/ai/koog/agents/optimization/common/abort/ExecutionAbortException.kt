@@ -44,3 +44,32 @@ public class SpendLimitExceededException(
 ) {
     override val abortResolvedId: String = "SpendLimitExceeded"
 }
+
+/**
+ * Execution-level abort raised when the observed dataset-item failure rate exceeds its configured maximum.
+ *
+ * Unlike a local dataset-stage failure, this exception propagates through stage boundaries and terminates
+ * the entire training session or evaluation run.
+ *
+ * @property failedItems Number of finished dataset-item stages that failed.
+ * @property finishedItems Total number of dataset-item stages that finished and form the ratio denominator.
+ * @property failureRateThreshold Maximum permitted failed-item ratio.
+ */
+public class DatasetFailureRateExceededAbortException(
+    public val failedItems: Int,
+    public val finishedItems: Int,
+    public val failureRateThreshold: Double,
+) : ExecutionAbortException(
+    "Dataset failure rate exceeded: $failedItems/$finishedItems items failed; " +
+            "threshold=$failureRateThreshold"
+) {
+    init {
+        require(finishedItems > 0) { "finishedItems must be positive" }
+        require(failedItems in 0..finishedItems) { "failedItems must be between zero and finishedItems" }
+    }
+
+    /** Observed failed-item ratio. */
+    public val failureRate: Double get() = failedItems.toDouble() / finishedItems
+
+    override val abortResolvedId: String = "DatasetFailureRateExceeded"
+}

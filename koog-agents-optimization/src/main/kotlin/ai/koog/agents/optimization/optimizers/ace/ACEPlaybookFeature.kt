@@ -30,6 +30,9 @@ public class ACEPlaybookFeatureConfig : FeatureConfig() {
  * Per-subgraph playbook content is handled separately via [ai.koog.agents.optimization.core.OptimizationArtifact.subgraphInstructions],
  * baked in at save time and applied by [ai.koog.agents.optimization.features.PromptOptimizationFeature].
  *
+ * Since koog 1.1.1 the strategy-level playbook also reaches every `freshHistory = true` subgraph,
+ * which inherits the agent's system messages instead of starting from an empty prompt.
+ *
  * Composable with other features:
  * ```kotlin
  * agent.copyWith(installFeatures = {

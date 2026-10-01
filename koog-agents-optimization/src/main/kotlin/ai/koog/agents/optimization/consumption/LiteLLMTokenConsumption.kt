@@ -20,6 +20,13 @@ public object LiteLLMTokensUnit : LLMConsumptionUnit {
  * - [inputTokens]: Tokens in the prompt/input
  * - [outputTokens]: Tokens in the completion/output
  * - [totalTokens]: Total tokens consumed
+ *
+ * All three come from the provider as-is, with no arithmetic on our side. So [inputTokens] + [outputTokens]
+ * can fall below [totalTokens]: a provider that bills reasoning tokens may count them in its total and leave
+ * them out of the completion count. Observed with `gemini-3-flash` via LiteLLM, where the gap was 4-10% of
+ * the total. [total] reports [totalTokens], so spend limits already see the larger figure.
+ *
+ * TODO: track reasoning/thinking tokens as their own count or account them in `outputTokens`, so the breakdown adds up.
  */
 @Serializable
 public data class LiteLLMTokenConsumption(

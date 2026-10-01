@@ -12,8 +12,10 @@ import ai.koog.agents.optimization.features.CollectedSubgraphTraces
 import ai.koog.agents.optimization.features.SubgraphTraceCollectionFeature
 import ai.koog.agents.optimization.features.collectSubgraphTraces
 import ai.koog.agents.optimization.features.installPromptOptimization
+import ai.koog.agents.optimization.utils.messages.hasToolCalls
+import ai.koog.agents.optimization.utils.messages.hasToolResults
 import ai.koog.agents.testing.tools.getMockExecutor
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.model.PromptExecutor
@@ -28,7 +30,7 @@ import kotlin.test.assertTrue
  * Integration tests exercising the full optimization flow across various agent topologies,
  * optimizer patterns, and rendering modes.
  */
-class OptimizationIntegrationTest {
+internal class OptimizationIntegrationTest {
 
     private val model = OpenAIModels.Chat.GPT4o
     private val finishTool = SubgraphWithTaskUtils.finishTool<String>()
@@ -195,8 +197,8 @@ class OptimizationIntegrationTest {
 
         // Subgraph instruction should be optimized (visible in the defineTask system message)
         assertTrue(
-            prompts.first().messages.any { it.content.contains("OPTIMIZED: default") },
-            "Subgraph instruction should be optimized. Got: ${prompts.first().messages.map { it.content }}"
+            prompts.first().messages.any { it.textContent().contains("OPTIMIZED: default") },
+            "Subgraph instruction should be optimized. Got: ${prompts.first().messages.map { it.textContent() }}"
         )
     }
 
@@ -213,9 +215,9 @@ class OptimizationIntegrationTest {
         assertTrue(prompts.size >= 2, "Expected at least 2 LLM calls")
 
         // Each subgraph should use its own optimized instruction
-        assertTrue(prompts[0].messages.any { it.content.contains("OPTIMIZED: default") },
+        assertTrue(prompts[0].messages.any { it.textContent().contains("OPTIMIZED: default") },
             "First subgraph (analyze) should have optimized instruction")
-        assertTrue(prompts[1].messages.any { it.content.contains("OPTIMIZED: default") },
+        assertTrue(prompts[1].messages.any { it.textContent().contains("OPTIMIZED: default") },
             "Second subgraph (summarize) should have optimized instruction")
     }
 
@@ -242,7 +244,7 @@ class OptimizationIntegrationTest {
         // Verify round 2 artifact works at runtime
         val prompts = runAndCapture(singleSubgraphStrategy(), r2, systemPrompt = "Be helpful.")
         assertTrue(prompts.first().messages.any {
-            it.content.contains("OPTIMIZED: OPTIMIZED: default")
+            it.textContent().contains("OPTIMIZED: OPTIMIZED: default")
         }, "Doubly-optimized instruction should appear in prompt")
     }
 
@@ -282,13 +284,13 @@ class OptimizationIntegrationTest {
         // Strategy system prompt should be replaced (visible because freshHistory=false)
         assertTrue(
             messages.filterIsInstance<Message.System>().any {
-                it.content == "Optimized strategy prompt."
+                it.textContent() == "Optimized strategy prompt."
             },
-            "Non-fresh subgraph should see the optimized strategy prompt. Got: ${messages.map { "${it.role}: ${it.content}" }}"
+            "Non-fresh subgraph should see the optimized strategy prompt. Got: ${messages.map { "${it.role}: ${it.textContent()}" }}"
         )
         assertTrue(
             messages.filterIsInstance<Message.System>().none {
-                it.content == "Original prompt."
+                it.textContent() == "Original prompt."
             },
             "Original prompt should be replaced"
         )
@@ -308,9 +310,9 @@ class OptimizationIntegrationTest {
         )
 
         val messages = prompts.first().messages
-        assertTrue(messages.any { it.content == "classify-input-r1" },
+        assertTrue(messages.any { it.textContent() == "classify-input-r1" },
             "Demo input should be injected as user message")
-        assertTrue(messages.any { it.content == "classify-output-r1" },
+        assertTrue(messages.any { it.textContent() == "classify-output-r1" },
             "Demo output should be injected as assistant message")
     }
 
@@ -329,8 +331,8 @@ class OptimizationIntegrationTest {
 
         val userMessages = prompts.first().messages.filterIsInstance<Message.User>()
         assertTrue(userMessages.any {
-            it.content.contains("Input: classify-input-r1") &&
-                it.content.contains("Output: classify-output-r1")
+            it.textContent().contains("Input: classify-input-r1") &&
+                it.textContent().contains("Output: classify-output-r1")
         }, "Demo should be rendered as a single string in a user message")
     }
 
@@ -354,7 +356,7 @@ class OptimizationIntegrationTest {
 
         val messages = prompts.first().messages
         for (round in 1..3) {
-            assertTrue(messages.any { it.content == "classify-input-r$round" },
+            assertTrue(messages.any { it.textContent() == "classify-input-r$round" },
                 "Demo from round $round should be present")
         }
     }
@@ -373,13 +375,13 @@ class OptimizationIntegrationTest {
         assertTrue(prompts.size >= 2)
 
         // First subgraph (analyze) should have its own demos
-        assertTrue(prompts[0].messages.any { it.content == "analyze-input-r1" })
-        assertTrue(prompts[0].messages.none { it.content == "summarize-input-r1" },
+        assertTrue(prompts[0].messages.any { it.textContent() == "analyze-input-r1" })
+        assertTrue(prompts[0].messages.none { it.textContent() == "summarize-input-r1" },
             "analyze should not see summarize's demos")
 
         // Second subgraph (summarize) should have its own demos
-        assertTrue(prompts[1].messages.any { it.content == "summarize-input-r1" })
-        assertTrue(prompts[1].messages.none { it.content == "analyze-input-r1" },
+        assertTrue(prompts[1].messages.any { it.textContent() == "summarize-input-r1" })
+        assertTrue(prompts[1].messages.none { it.textContent() == "analyze-input-r1" },
             "summarize should not see analyze's demos")
     }
 
@@ -408,7 +410,7 @@ class OptimizationIntegrationTest {
         )
 
         // Strategy demos should be visible in non-freshHistory subgraph
-        assertTrue(prompts.first().messages.any { it.content == "strategy-input-r1" },
+        assertTrue(prompts.first().messages.any { it.textContent() == "strategy-input-r1" },
             "Strategy-level demo should be visible in non-freshHistory subgraph")
     }
 
@@ -429,11 +431,11 @@ class OptimizationIntegrationTest {
         val messages = prompts.first().messages
 
         // Instruction optimized
-        assertTrue(messages.any { it.content.contains("OPTIMIZED:") },
+        assertTrue(messages.any { it.textContent().contains("OPTIMIZED:") },
             "Instruction should be optimized")
 
         // Demos injected
-        assertTrue(messages.any { it.content == "classify-input-r1" },
+        assertTrue(messages.any { it.textContent() == "classify-input-r1" },
             "Demo should be injected")
     }
 
@@ -467,16 +469,16 @@ class OptimizationIntegrationTest {
         // analyze subgraph: 3 demos, optimized instruction
         val analyzeMessages = prompts[0].messages
         for (round in 1..3) {
-            assertTrue(analyzeMessages.any { it.content == "analyze-input-r$round" },
+            assertTrue(analyzeMessages.any { it.textContent() == "analyze-input-r$round" },
                 "analyze should have demo from round $round")
         }
-        assertTrue(analyzeMessages.none { it.content.contains("summarize-input") },
+        assertTrue(analyzeMessages.none { it.textContent().contains("summarize-input") },
             "analyze should not have summarize's demos")
 
         // summarize subgraph: 3 demos, optimized instruction
         val summarizeMessages = prompts[1].messages
         for (round in 1..3) {
-            assertTrue(summarizeMessages.any { it.content == "summarize-input-r$round" },
+            assertTrue(summarizeMessages.any { it.textContent() == "summarize-input-r$round" },
                 "summarize should have demo from round $round")
         }
     }
@@ -510,9 +512,9 @@ class OptimizationIntegrationTest {
             "System message should be stripped from intermediate messages")
 
         // finalize_task_result Tool.Call should be converted to Assistant.
-        assertTrue(demo.intermediateMessages.none { it is Message.Tool.Call },
+        assertTrue(demo.intermediateMessages.none { it.hasToolCalls() },
             "Tool.Call should be converted to Assistant")
-        assertTrue(demo.intermediateMessages.none { it is Message.Tool.Result },
+        assertTrue(demo.intermediateMessages.none { it.hasToolResults() },
             "Tool.Result should be removed")
     }
 
@@ -548,7 +550,7 @@ class OptimizationIntegrationTest {
 
         // With FULL_TRACE (default), the demo's intermediate messages are injected.
         // The training input appears inside the defineTask system message, not as a standalone message.
-        assertTrue(messages.any { it.content.contains("training-input") },
+        assertTrue(messages.any { it.textContent().contains("training-input") },
             "Bootstrapped demo content should appear in prompt")
     }
 
@@ -600,7 +602,7 @@ class OptimizationIntegrationTest {
 
         val userMessages = prompts.first().messages.filterIsInstance<Message.User>()
         assertTrue(userMessages.any {
-            it.content.contains("Input: train") && it.content.contains("Output:")
+            it.textContent().contains("Input: train") && it.textContent().contains("Output:")
         }, "AS_STRING + COMPACT should render demo as single formatted user message")
     }
 
@@ -625,7 +627,7 @@ class OptimizationIntegrationTest {
         // AS_STRING should produce a user message with "Input:" and "Output:" format
         val userMessages = prompts.first().messages.filterIsInstance<Message.User>()
         assertTrue(userMessages.any {
-            it.content.contains("Input: demo-in") && it.content.contains("Output: demo-out")
+            it.textContent().contains("Input: demo-in") && it.textContent().contains("Output: demo-out")
         }, "Subgraph should inherit AS_STRING from feature defaults")
     }
 
@@ -658,9 +660,9 @@ class OptimizationIntegrationTest {
 
         // AS_MESSAGE_HISTORY produces separate user/assistant messages
         val messages = prompts.first().messages
-        assertTrue(messages.any { it is Message.User && it.content == "demo-in" },
+        assertTrue(messages.any { it is Message.User && it.textContent() == "demo-in" },
             "Subgraph override should use AS_MESSAGE_HISTORY, not AS_STRING")
-        assertTrue(messages.any { it is Message.Assistant && it.content == "demo-out" },
+        assertTrue(messages.any { it is Message.Assistant && it.textContent() == "demo-out" },
             "Subgraph override should produce assistant message")
     }
 }

@@ -40,6 +40,8 @@ public class TrainingSession<Input, Output, InputLabel>(
     private val spendLimit: JsonElement?,
     /** Retry config, pre-encoded by the app, recorded verbatim in [ExecutionMetadata]. */
     private val retries: JsonElement?,
+    /** The run's resolved configuration, pre-encoded by the caller, recorded verbatim in [TrainingResult]. */
+    private val resolvedConfigurationDump: JsonElement? = null,
     /** Consulted on every recompute with the running cumulative consumption; may abort the run. */
     private val abortPolicies: List<AbortPolicy> = emptyList(),
     /** Invoked with the root record on session start, on each stage update, and on finish. */
@@ -130,12 +132,22 @@ public class TrainingSession<Input, Output, InputLabel>(
         if (blockException != null) {
             throw blockException
         }
-        return TrainingResult(rootStage = rootRecord, executionMetadata = executionMetadata)
+        return TrainingResult(
+            trainingName = trainingName,
+            executionMetadata = executionMetadata,
+            rootStage = rootRecord,
+            resolvedConfigurationDump = resolvedConfigurationDump,
+        )
     }
 
     private fun writeRecordsToDisk(record: StageRecord, executionMetadata: ExecutionMetadata) {
         val filePath = recordsFilePath ?: return
-        val result = TrainingResult(rootStage = record, executionMetadata = executionMetadata)
+        val result = TrainingResult(
+            trainingName = trainingName,
+            executionMetadata = executionMetadata,
+            rootStage = record,
+            resolvedConfigurationDump = resolvedConfigurationDump,
+        )
         try {
             filePath.writeText(
                 defaultExperimentsJson.encodeToStringStripped(TrainingResult.serializer(), result)

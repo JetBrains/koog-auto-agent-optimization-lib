@@ -57,6 +57,7 @@ public enum class AutoRunMode(public val numCandidates: Int, public val valExamp
  * @param metaModel LLM model for meta-LLM calls (instruction proposal, dataset summarization).
  * @param autoMode Preset mode controlling defaults (LIGHT/MEDIUM/HEAVY).
  * @param numCandidatesOverride Manual override for number of candidates per module.
+ * @param valExamplesOverride Manual override for the validation-set size used to score candidates.
  * @param numTrialsOverride Manual override for grid search trials.
  * @param maxBootstrappedDemos Max demos per bootstrap run.
  * @param maxTotalDemos Total demo slots (bootstrapped and labeled).
@@ -70,6 +71,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
     private val metaModel: LLModel,
     private val autoMode: AutoRunMode = AutoRunMode.LIGHT,
     private val numCandidatesOverride: Int? = null,
+    private val valExamplesOverride: Int? = null,
     private val numTrialsOverride: Int? = null,
     private val maxBootstrappedDemos: Int = 4,
     private val maxTotalDemos: Int = 8,
@@ -81,6 +83,18 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
 ) : AgentOptimizer<Input, Output, InputLabel> {
 
     private val random = Random(randomSeed)
+
+    init {
+        require(numCandidatesOverride == null || numCandidatesOverride > 0) {
+            "numCandidatesOverride must be positive"
+        }
+        require(valExamplesOverride == null || valExamplesOverride > 0) { "valExamplesOverride must be positive" }
+        require(numTrialsOverride == null || numTrialsOverride > 0) { "numTrialsOverride must be positive" }
+        // Both demo counts at zero is zero-shot mode, which `generateDemoSets` supports.
+        require(maxBootstrappedDemos >= 0) { "maxBootstrappedDemos must not be negative" }
+        require(maxTotalDemos >= 0) { "maxTotalDemos must not be negative" }
+        require(parallelism > 0) { "parallelism must be positive" }
+    }
 
     @OptIn(InternalAgentsApi::class)
     override fun loadOptimizedAgent(baseAgent: GraphAIAgent<Input, Output>): GraphAIAgent<Input, Output> {
@@ -97,16 +111,17 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
     ): TrainingResult = session.use(stagesTotal = 3) {
         require(dataset.size >= 2) { "MIPRO requires at least 2 training examples" }
 
+        // Each number the auto mode supplies applies unless its own override is set.
         val numCandidates = numCandidatesOverride ?: autoMode.numCandidates
+        val valExamples = valExamplesOverride ?: autoMode.valExamples
 
         // Split dataset: first 20% for bootstrap, capped validation set for grid search
         val splitIndex = maxOf(1, dataset.size / 5)
         val bootstrapSet = dataset.take(splitIndex)
-        val valSet = dataset.shuffled(Random(random.nextLong())).take(autoMode.valExamples)
+        val valSet = dataset.shuffled(Random(random.nextLong())).take(valExamples)
 
         // Discover optimizable modules
         val modules = discoverModules(trackedAgent)
-        logger.info { "MIPRO: found ${modules.size} modules: ${modules.map { it.name }}" }
 
         // Compute the number of trials
         val numModules = modules.size
@@ -118,7 +133,20 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
                 ceil(1.5 * numCandidates).toInt(),
             ),
         )
-        logger.info { "MIPRO: $numCandidates candidates, $numTrials trials" }
+
+        logMiproRunSetup(
+            modules = modules,
+            autoMode = autoMode,
+            numCandidates = numCandidates,
+            numTrials = numTrials,
+            overriddenBudgetValues = listOfNotNull(
+                "numCandidates".takeIf { numCandidatesOverride != null },
+                "valExamples".takeIf { valExamplesOverride != null },
+                "numTrials".takeIf { numTrialsOverride != null },
+            ),
+            bootstrapSetSize = bootstrapSet.size,
+            validationSetSize = valSet.size,
+        )
 
         // Step 1: Demo Generation
         val demoCandidates = runStageOrThrow("Step 1: Demo Generation") {
@@ -133,10 +161,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
                 parallelism = parallelism,
                 randomSeed = randomSeed,
             )
-            logger.info {
-                val summary = demos?.entries?.joinToString(", ") { (k, v) -> "$k: ${v.size} sets" } ?: "null (zero-shot)"
-                "MIPRO Step 1 complete. Demo candidates: $summary"
-            }
+            logMiproDemoSets(demos)
             demos
         }
 
@@ -158,7 +183,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
                 numCandidates = numCandidates,
                 parallelism = parallelism,
             )
-            logger.info { "MIPRO Step 2 complete. Instruction candidates per module: ${candidates.mapValues { it.value.size }}" }
+            logMiproInstructionCandidates(candidates)
             candidates
         }
 
@@ -193,58 +218,71 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
     ): OptimizationArtifact {
         var bestArtifact = OptimizationArtifact()
         var bestScore = -1.0
+        var bestTrial: Int? = null
+        var bestInstructions: Map<String, Int> = emptyMap()
+        var bestDemoSets: Map<String, Int> = emptyMap()
 
         runStageOrThrow("Baseline (no optimization)") {
-            logger.info { "  Evaluating baseline (no optimization) on ${valSet.size} items..." }
+            logger.info { "MIPRO baseline (no optimization): evaluating on ${valSet.size} items..." }
             val baselineScore = evaluateArtifact(OptimizationArtifact(), valSet)
-            logger.info { "  Baseline score: ${"%.4f".format(baselineScore)}" }
             bestScore = baselineScore
             bestArtifact = OptimizationArtifact()
-            logAction { put("score", baselineScore) }
+            logMiproBaselineScore(baselineScore)
         }
 
         for (trial in 0 until numTrials) {
             runStageOrThrow("Trial ${trial + 1}/$numTrials") {
-                logger.info { "  Trial ${trial + 1}/$numTrials: evaluating on ${valSet.size} items..." }
-                val trialArtifact = sampleTrialArtifact(modules, instructionCandidates, demoCandidates)
-                val score = evaluateArtifact(trialArtifact, valSet)
+                logger.info { "MIPRO trial ${trial + 1}/$numTrials: evaluating on ${valSet.size} items..." }
+                val combination = sampleTrialArtifact(modules, instructionCandidates, demoCandidates)
+                logMiproTrialCombination(combination.instructionIndices, combination.demoSetIndices)
+                val score = evaluateArtifact(combination.artifact, valSet)
 
                 // Use >= to prefer optimized artifacts over baseline on tie
                 val isNewBest = score >= bestScore
                 if (isNewBest) {
                     bestScore = score
-                    bestArtifact = trialArtifact
-                    logger.info { "  Trial ${trial + 1}/$numTrials: score=${"%.4f".format(score)} *** new best ***" }
-                } else {
-                    logger.info { "  Trial ${trial + 1}/$numTrials: score=${"%.4f".format(score)}, best=${"%.4f".format(bestScore)}" }
+                    bestArtifact = combination.artifact
+                    bestTrial = trial + 1
+                    bestInstructions = combination.instructionIndices
+                    bestDemoSets = combination.demoSetIndices
                 }
-                logAction {
-                    put("score", score)
-                    put("isNewBest", isNewBest)
-                    put("bestScore", bestScore)
-                }
+                logMiproTrialOutcome(
+                    trialNumber = trial + 1,
+                    trialCount = numTrials,
+                    averageValidationScore = score,
+                    isNewBest = isNewBest,
+                    bestAverageValidationScore = bestScore,
+                )
             }
         }
 
-        logger.info { "Grid search complete. Best score: ${"%.4f".format(bestScore)}" }
+        logMiproGridSearchResult(bestScore, bestTrial, bestInstructions, bestDemoSets)
         return bestArtifact
     }
 
     /**
-     * Samples a random (instruction, demo set) combination into an artifact.
+     * Samples a random (instruction, demo set) combination into an artifact, and returns the position it
+     * drew in each module's candidate list so a trial can record it.
+     *
+     * _Note on reproducibility._ The position comes from `nextInt(size)`, the draw `Collection.random(random)` performs.
+     * Keep it that way: another way of drawing consumes the generator differently and moves MIPROv2's search.
      */
     private fun sampleTrialArtifact(
         modules: List<OptimizableModule>,
         instructionCandidates: Map<String, List<String>>,
         demoCandidates: Map<String, List<List<Demonstration>>>?,
-    ): OptimizationArtifact {
+    ): TrialCombination {
         var artifact = OptimizationArtifact()
+        val instructionIndices = mutableMapOf<String, Int>()
+        val demoSetIndices = mutableMapOf<String, Int>()
 
         for (module in modules) {
             // Sample random instruction
             val instructions = instructionCandidates[module.name]
             if (!instructions.isNullOrEmpty()) {
-                val instruction = instructions.random(random)
+                val instructionIndex = random.nextInt(instructions.size)
+                val instruction = instructions[instructionIndex]
+                instructionIndices[module.name] = instructionIndex
                 artifact = if (module.name == STRATEGY_MODULE_KEY) {
                     artifact.withStrategyInstruction(instruction)
                 } else {
@@ -256,7 +294,9 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
             if (demoCandidates != null) {
                 val demoSets = demoCandidates[module.name]
                 if (!demoSets.isNullOrEmpty()) {
-                    val demos = demoSets.random(random)
+                    val demoSetIndex = random.nextInt(demoSets.size)
+                    val demos = demoSets[demoSetIndex]
+                    demoSetIndices[module.name] = demoSetIndex
                     artifact = if (module.name == STRATEGY_MODULE_KEY) {
                         artifact.withStrategyDemonstrations(demos)
                     } else {
@@ -266,7 +306,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
             }
         }
 
-        return artifact
+        return TrialCombination(artifact, instructionIndices, demoSetIndices)
     }
 
     /**
@@ -316,3 +356,9 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
     }
 }
 
+/** One sampled (instruction, demo set) combination, with the candidate index it drew for each module. */
+private data class TrialCombination(
+    val artifact: OptimizationArtifact,
+    val instructionIndices: Map<String, Int>,
+    val demoSetIndices: Map<String, Int>,
+)

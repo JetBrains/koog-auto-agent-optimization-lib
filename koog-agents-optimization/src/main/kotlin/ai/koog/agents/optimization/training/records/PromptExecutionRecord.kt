@@ -9,7 +9,6 @@ import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonElement
 import kotlin.time.Duration
 
 /** Records the outcome of a single prompt execution (possibly across retries). Leaf record — no substages. */
@@ -44,9 +43,6 @@ public sealed class PromptExecutionRecord : TrainingRecord(), LeafRecordWithRetr
         @Serializable(with = PrettyRoundedDurationSerializer::class)
         override val elapsedTime: Duration,
         override val consumption: LLMConsumptionOrNA,
-        /** Free-form structured log of actions taken during the execution, serialized only when present. */
-        @EncodeDefault(EncodeDefault.Mode.NEVER)
-        val actionLog: JsonElement? = null,
         @EncodeDefault(EncodeDefault.Mode.NEVER)
         override val previousAttempts: List<FailedAttempt> = emptyList(),
     ) : PromptExecutionRecord()

@@ -9,19 +9,20 @@ An optimizer sees your agent as a set of tunable **modules** — the same idea a
 [DSPy module](https://dspy.ai): a named unit with an instruction (and optional demonstrations)
 that the optimizer is free to rewrite. There are two levels:
 
-- **The strategy system prompt** — the `__strategy__` module. This is the system prompt you
-  pass when you build the agent. Every agent has it, so even a plain `singleRunStrategy()` agent
-  (like the one in [getting-started.md](getting-started.md)) is already optimizable: an optimizer
-  can rewrite its system prompt, attach few-shot demonstrations, or append a learned playbook.
+- **The strategy system prompt** — the `__strategy__` module. This is the non-empty system prompt
+  you pass when you build the agent. If the agent has no system prompt, or its system prompt is
+  explicitly empty, no strategy-level module is discovered; optimizers can still tune any
+  optimizable subgraphs you declare.
 
 - **Optimizable subgraphs** — finer-grained, per-step modules inside your strategy (the closest
   analogue to a DSPy module). When a single system prompt is too coarse — your agent reasons in
   stages, and each stage needs its own focused instruction — you declare those stages as optimizable
   subgraphs. The optimizer then tunes each one independently.
 
-GEPA, MIPROv2, and BootstrapFewShot optimize the strategy system prompt **plus** every optimizable
-subgraph you declare. **ACE currently optimizes only the strategy-level context** (it curates a
-playbook for the `__strategy__` module); per-subgraph optimization for ACE is a work in progress.
+GEPA, MIPROv2, and BootstrapFewShot optimize the strategy system prompt, when present and
+non-empty, **plus** every optimizable subgraph you declare. **ACE currently optimizes only the
+strategy-level context** (it curates a playbook for the `__strategy__` module); per-subgraph
+optimization for ACE is a work in progress.
 
 You don't need subgraphs to start. Reach for them when one prompt can't capture everything the
 agent must get right.
@@ -49,13 +50,14 @@ The key parameters:
   guess — either way the optimizer evolves it from here.
 - **`name`** — the module's name, defaulting to the delegated property name (`analyze` above).
   It must be **unique within the strategy**: the optimization artifact uses it as a lookup key.
-- **`freshHistory`** — when `true`, the subgraph starts with an empty conversation history. The
-  resolved instruction is placed as a fresh system message and the task query follows it. This is a
-  new parameter we added to Koog's `subgraph(...)` in the [fork](index.md) (expected to land
-  upstream); it lets you (a) **isolate** a subgraph's prompt from the rest of the conversation,
-  (b) give each subgraph its **own clean, independently optimizable system message**, and (c) keep
-  prompts focused and cheaper for classification/routing-style steps that shouldn't inherit prior
-  chatter.
+- **`freshHistory`** — when `true`, the subgraph drops the conversation turns that came before it but
+  **keeps the agent's system messages**, then appends the resolved instruction as one more system
+  message, with the task query after it. It lets you (a) **isolate** a
+  subgraph from prior chatter, (b) give each subgraph its **own independently optimizable
+  instruction** on top of the shared system prompt, and (c) keep prompts focused and cheaper for
+  classification/routing-style steps. Note the consequence: a fresh subgraph normally runs with two
+  system messages — the agent's and its own — and optimizing the agent-level prompt changes the
+  context every subgraph sees.
 - **`defineTask { instruction, input -> ... }`** — builds the **user message** for this subgraph
   from the (resolved) instruction and the subgraph input, returning a `String`. The `instruction`
   argument already reflects any optimization; you usually compose your query from `input` and let
@@ -158,9 +160,9 @@ repeat that here.
   makes its prompt cleanly optimizable. Leave it `false` when the step genuinely needs the prior
   conversation.
 - **The two levels compose.** Strategy-level and subgraph-level optimization are not exclusive —
-  an optimizer tunes the `__strategy__` system prompt and every subgraph in the same run. Start with
-  just the strategy prompt; add optimizable subgraphs as you find steps that need their own
-  instructions.
+  when the strategy system prompt is non-empty, an optimizer tunes the `__strategy__` module and
+  every optimizable subgraph in the same run. Start with just the strategy prompt; add optimizable
+  subgraphs as you find steps that need their own instructions.
 
 ## Next
 

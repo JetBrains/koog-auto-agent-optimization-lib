@@ -38,14 +38,6 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4
 
-      # The library compiles against a fork of Koog (optimizable-subgraph support) that isn't on
-      # Maven Central; Dokka needs it on the classpath. Publish it to mavenLocal first.
-      - name: Publish Koog fork to mavenLocal
-        run: |
-          git clone --depth 1 --branch stable-agent-optimization https://github.com/valemore/koog.git /tmp/koog-fork
-          cd /tmp/koog-fork
-          ./gradlew --no-daemon publishToMavenLocal
-
       - name: Build Dokka HTML (API reference)
         run: ./gradlew --no-daemon :koog-agents-optimization:dokkaGeneratePublicationHtml
 

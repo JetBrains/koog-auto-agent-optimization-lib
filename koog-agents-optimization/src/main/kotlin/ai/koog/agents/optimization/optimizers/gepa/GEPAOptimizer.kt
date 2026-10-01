@@ -1,85 +1,424 @@
 package ai.koog.agents.optimization.optimizers.gepa
 
-
 import ai.koog.agents.core.agent.GraphAIAgent
 import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.optimization.core.OptimizableModule
 import ai.koog.agents.optimization.core.OptimizationArtifact
-import ai.koog.agents.optimization.core.STRATEGY_MODULE_KEY
 import ai.koog.agents.optimization.core.discoverModules
-import ai.koog.agents.optimization.features.collectSubgraphTraces
+import ai.koog.agents.optimization.core.initialArtifactOf
 import ai.koog.agents.optimization.features.installPromptOptimization
 import ai.koog.agents.optimization.koogTooling.copyWith
-import ai.koog.agents.optimization.koogTooling.getCollectedTraces
 import ai.koog.agents.optimization.optimizers.AgentOptimizer
 import ai.koog.agents.optimization.optimizers.TrainSet
-import ai.koog.agents.optimization.optimizers.TrainSetItem
 import ai.koog.agents.optimization.training.TrainingSession
 import ai.koog.agents.optimization.training.dsl.StageScope
-import ai.koog.agents.optimization.training.dsl.executePromptOrThrow
-import ai.koog.agents.optimization.training.dsl.runIterableStageOrThrow
 import ai.koog.agents.optimization.training.dsl.runStageOrThrow
 import ai.koog.agents.optimization.training.records.TrainingResult
 import ai.koog.agents.optimization.utils.common.ResilientPath
-import ai.koog.agents.optimization.utils.common.toFilePathLog
 import ai.koog.prompt.llm.LLModel
-import ai.koog.prompt.message.Message
 import io.github.oshai.kotlinlogging.KotlinLogging
 import kotlinx.serialization.json.Json
 import kotlin.random.Random
 
 private val logger = KotlinLogging.logger {}
 
-/**
- * Strategy for choosing which optimizable modules GEPA updates on each evolution iteration.
- */
-public enum class ComponentSelection {
-    /** Update one module per iteration, cycling through modules in order. */
-    ROUND_ROBIN,
+private fun <T> repeatedShuffled(items: List<T>, random: Random): Sequence<T> = sequence {
+    check(items.isNotEmpty()) { "Cannot sample batches from an empty dataset" }
 
-    /** Update every module on each iteration. */
-    ALL_AT_ONCE,
+    while (true) {
+        yieldAll(items.shuffled(random))
+    }
 }
 
 /**
- * GEPA (Genetic-Pareto Optimizer for Reflective Prompt Evolution).
+ * Strategy for choosing which optimizable modules GEPA updates on each feedback batch.
+ */
+public enum class GEPAModuleSelectionStrategy {
+    /** Update one module per accepted proposal opportunity, cycling through modules per parent candidate. */
+    ROUND_ROBIN,
+
+    /** Update every discovered module from the same feedback batch. */
+    ALL,
+}
+
+/**
+ * The two sets GEPA trains on, split off a training set.
  *
- * An instruction-only optimizer that evolves module instructions via reflective LLM feedback
- * on failure cases, with Pareto-based candidate selection for diversity.
+ * @property feedbackSet Items GEPA collects module-level textual feedback on (`D_feedback` in the paper).
+ * @property validationSet Items an accepted candidate is scored on (`D_pareto` in the paper).
+ */
+public data class GEPATrainSetSplit<Input, InputLabel>(
+    val feedbackSet: TrainSet<Input, InputLabel>,
+    val validationSet: TrainSet<Input, InputLabel>,
+)
+
+/**
+ * GEPA optimizer, based on "GEPA: Reflective Prompt Evolution Can Outperform Reinforcement Learning"
+ * (https://arxiv.org/abs/2507.19457).
  *
- * **Early implementation.** This is a non-official re-implementation that deviates from the original
- * GEPA algorithm (https://arxiv.org/abs/2507.19457) and may underperform the paper. Validate on your
- * own task before relying on it; closing the gap is future work.
+ * Training splits the dataset into feedback and validation sets, proposes instruction updates from
+ * module-level textual feedback, and keeps candidates that improve over their parent on feedback batches.
+ * Accepted candidates are evaluated on the validation set and tracked in a Pareto-style candidate pool.
  *
- * Key differences from MIPROv2:
- * - Optimizes instructions only (no demonstrations) -> shorter, more generalizable prompts
- * - Uses textual feedback from a reflection LM analyzing failure traces
- * - a Pareto frontier maintains diverse candidate pool (vs. best-so-far)
- * - Optional crossover merges complementary candidates
- *
- * @param reflectionModel LLM model for reflection / instruction proposal. Calls are routed
- *   through the training DSL's tracked `executePrompt`, so timing and consumption are recorded
- *   under the appropriate iteration stage.
- * @param storagePath Path for saving the optimization artifact.
- * @param maxIterations Maximum number of evolution iterations.
- * @param minibatchSize Number of training items sampled per iteration for reflection.
- * @param componentSelection How to select which modules to update each iteration.
- * @param enableCrossover Whether to attempt merging complementary candidates during the loop.
- * @param maxMergeInvocations Maximum number of crossover attempts per optimization run.
- * @param randomSeed Seed for reproducibility.
- * @param labelExtractor Converts a dataset item's label to a string for the reflection LM.
+ * @property storagePath Path where the best optimization artifact is written and later loaded from.
+ * @property numRollouts Total rollout budget, including the initial validation-set evaluation. A practical starting point is 6–20
+ * times the input training dataset size, matching the hyperparameter choice for runs reported in the GEPA paper.
+ * @property failureScore Score assigned to a rollout whose agent execution still fails after retries are exhausted.
+ * @property feedbackFailureRateThreshold Maximum failed-item ratio tolerated in parent and candidate feedback batches.
+ * @property validationFailureRateThreshold Maximum failed-item ratio tolerated in candidate validation runs.
+ * @property seedValidationFailureRateThreshold Maximum failed-item ratio tolerated in the initial seed validation.
+ * @property abortOnFailureRateExceeded Whether exceeding a rollout failure-rate threshold aborts the optimization.
  */
 public class GEPAOptimizer<Input, Output, InputLabel>(
+    private val gepaFeedback: GEPAFeedback<Input, Output, InputLabel>,
+    private val feedbackValSplitFn: (TrainSet<Input, InputLabel>) -> GEPATrainSetSplit<Input, InputLabel>,
     private val reflectionModel: LLModel,
     public val storagePath: ResilientPath,
-    private val maxIterations: Int,
-    private val minibatchSize: Int,
-    private val componentSelection: ComponentSelection,
-    private val enableCrossover: Boolean,
-    private val maxMergeInvocations: Int = 5, // TODO: wire through GEPAConfig and createGEPAOptimizer, remove default
-    private val randomSeed: Long = 42L,
-    private val labelExtractor: (TrainSetItem<Input, InputLabel>) -> String,
+    private val numRollouts: Int,
+    private val feedbackBatchSize: Int = 3,
+    private val skipPerfectFeedbackBatches: Boolean = true,
+    private val perfectScoreThreshold: Double = 1.0,
+    private val randomSeed: Long = 42,
+    private val moduleSelectionStrategy: GEPAModuleSelectionStrategy = GEPAModuleSelectionStrategy.ROUND_ROBIN,
+    private val useStructuredOutput: Boolean = false,
+    private val requireThinkingFieldInOutput: Boolean = false,
+    private val mergeConfig: GEPAMergeConfig = GEPAMergeConfig(),
+    private val failureScore: Double = 0.0,
+    private val feedbackFailureRateThreshold: Double = 1.0,
+    private val validationFailureRateThreshold: Double = 0.9,
+    private val seedValidationFailureRateThreshold: Double = 0.0,
+    private val abortOnFailureRateExceeded: Boolean = true,
 ) : AgentOptimizer<Input, Output, InputLabel> {
+    private val reflectionProposer = GEPAReflectionProposer(
+        reflectionModel = reflectionModel,
+        useStructuredOutput = useStructuredOutput,
+        requireThinkingFieldInOutput = requireThinkingFieldInOutput,
+    )
+
+    init {
+        require(numRollouts > 0) { "numRollouts must be positive" }
+        require(feedbackBatchSize > 0) { "feedbackBatchSize must be positive" }
+        require(perfectScoreThreshold.isFinite()) { "perfectScore must be finite" }
+        require(failureScore.isFinite()) { "failureScore must be finite" }
+        require(feedbackFailureRateThreshold in 0.0..1.0) {
+            "feedbackFailureRateThreshold must be between 0.0 and 1.0"
+        }
+        require(validationFailureRateThreshold in 0.0..1.0) {
+            "validationFailureRateThreshold must be between 0.0 and 1.0"
+        }
+        require(seedValidationFailureRateThreshold in 0.0..1.0) {
+            "seedValidationFailureRateThreshold must be between 0.0 and 1.0"
+        }
+        require(!requireThinkingFieldInOutput || useStructuredOutput) {
+            "requireThinkingFieldInOutput=true requires useStructuredOutput=true"
+        }
+    }
+
+    override suspend fun train(session: TrainingSession<Input, Output, InputLabel>): TrainingResult =
+        session.use(stagesTotal = 1) {
+            runStageOrThrow("GEPA optimization") {
+                val random = Random(randomSeed)
+                val modules = discoverModules(trackedAgent)
+                require(modules.isNotEmpty()) { "No modules found" }
+
+                // Split into feedback and validation sets (D_feedback and D_pareto in the paper).
+                val (feedbackSet, valSet) = feedbackValSplitFn(dataset)
+                require(feedbackSet.isNotEmpty()) { "feedbackSet must not be empty" }
+                require(valSet.isNotEmpty()) { "valSet must not be empty" }
+                require(numRollouts > valSet.size) {
+                    "numRollouts ($numRollouts) must exceed the initial validation evaluation cost (${valSet.size})"
+                }
+                logGepaRunSetup(modules, feedbackSetSize = feedbackSet.size, validationSetSize = valSet.size)
+
+                // GEPA runs until the rollout budget is exhausted.
+                // Budget is consumed by evaluating candidates on any item in the feedback or validation set.
+                // LLM calls for reflection and prompt updates do not count against the budget.
+                val budget = RolloutBudget(numRollouts)
+
+                // Initialize candidate pool with the unoptimized prompts.
+                val candidatePool = initializeCandidatePool(valSet, random, budget)
+
+                // Proposes new prompt candidates from parent rollouts.
+                val candidateProposer = GEPACandidateProposer(reflectionProposer, modules)
+
+                val gepaMerge = if (mergeConfig.enabled) {
+                    GEPAMerge(candidatePool, mergeConfig, random)
+                } else {
+                    null
+                }
+
+                // Main optimization loop
+                // 1. Sample batch from feedback set
+                // 2. Select parent from candidate pool, select module to optimize
+                // 3. Evaluate parent on feedback batch
+                // 4. Skip the batch if the parent already solves every item
+                // 5. Propose new instruction via GEPA's meta reflection and update prompt
+                // 6. Evaluate proposed candidate on feedback batch
+                // 7. If proposed candidate is better on feedback set, evaluate on validation set and add it to the pool
+                var batchIndex = 0
+                var mergeAttemptIndex = 0
+                val feedbackBatches = repeatedShuffled(feedbackSet, random).chunked(feedbackBatchSize).iterator()
+                while (budget.hasRemaining) {
+                    // If merge is due, attempt it.
+                    if (gepaMerge != null && gepaMerge.shouldAttemptMerge()) {
+                        mergeAttemptIndex++
+                        runMergeAttempt(mergeAttemptIndex, gepaMerge, candidatePool, valSet, budget)
+                        gepaMerge.notifyMergeAttemptFinished()
+                        continue
+                    }
+
+                    val batch = feedbackBatches.next()
+                    batchIndex++
+                    runFeedbackBatch(
+                        batchIndex = batchIndex,
+                        batch = batch,
+                        candidatePool = candidatePool,
+                        candidateProposer = candidateProposer,
+                        modules = modules,
+                        valSet = valSet,
+                        gepaMerge = gepaMerge,
+                        budget = budget,
+                    )
+                }
+
+                val bestCandidateId = saveBestArtifact(candidatePool)
+                logGepaRunTotals(
+                    rolloutsUsed = budget.spent,
+                    batchesRun = batchIndex,
+                    mergeAttempts = mergeAttemptIndex.takeIf { gepaMerge != null },
+                    candidatesAdded = candidatePool.size - 1,
+                    bestCandidateId = bestCandidateId,
+                )
+            }
+        }
+
+    /** Evaluates the agent's current instructions on [valSet] and seeds the pool with them. */
+    private suspend fun StageScope<Input, Output, InputLabel>.initializeCandidatePool(
+        valSet: TrainSet<Input, InputLabel>,
+        random: Random,
+        budget: RolloutBudget,
+    ): GEPACandidatePool = runStageOrThrow("Initialize candidate pool") {
+        val candidatePool = GEPACandidatePool(valSet.size, random)
+        val initialArtifact = initialArtifactOf(trackedAgent)
+        val initialCandidateEvaluation = runGepaRollouts(
+            candidate = initialArtifact,
+            dataset = valSet,
+            stageName = "Evaluate initial candidate on validation set",
+            gepaFeedback = gepaFeedback,
+            failureScore = failureScore,
+            failureRateThreshold = seedValidationFailureRateThreshold,
+            abortOnFailureRateExceeded = abortOnFailureRateExceeded,
+        )
+        budget.spend(valSet.size)
+        candidatePool.add(initialArtifact, emptyList(), initialCandidateEvaluation.scores)
+        logGepaSeedCandidate(
+            seedCandidateId = candidatePool.idOf(initialArtifact),
+            seedArtifact = initialArtifact,
+            averageValidationScore = initialCandidateEvaluation.scores.average(),
+        )
+        candidatePool
+    }
+
+    /**
+     * Runs one feedback batch: draws a parent from the pool, proposes a candidate from the parent's
+     * rollouts, and adds the candidate to the pool when it improves on the parent.
+     */
+    private suspend fun StageScope<Input, Output, InputLabel>.runFeedbackBatch(
+        batchIndex: Int,
+        batch: TrainSet<Input, InputLabel>,
+        candidatePool: GEPACandidatePool,
+        candidateProposer: GEPACandidateProposer,
+        modules: List<OptimizableModule>,
+        valSet: TrainSet<Input, InputLabel>,
+        gepaMerge: GEPAMerge?,
+        budget: RolloutBudget,
+    ) {
+        runStageOrThrow("Feedback batch $batchIndex") {
+            // Sample among Pareto-front representatives, weighted by validation items where they are representative.
+            val (parent, frontierWeights) = candidatePool.selectParent()
+            logGepaParentSelection(candidatePool.idOf(parent), frontierWeights)
+
+            val parentRollouts = runGepaRollouts(
+                candidate = parent,
+                dataset = batch,
+                stageName = "Evaluate parent on feedback batch $batchIndex",
+                gepaFeedback = gepaFeedback,
+                failureScore = failureScore,
+                failureRateThreshold = feedbackFailureRateThreshold,
+                abortOnFailureRateExceeded = abortOnFailureRateExceeded,
+            )
+            budget.spend(batch.size)
+            // Parent failures make it easier for the candidate to improve on the parent
+            // This risks spending budget on a bad candidate, which is why we always skip
+            if (parentRollouts.hasFailures) {
+                logger.warn {
+                    "Skipping feedback batch $batchIndex because the parent failed on rollout indices " +
+                            "${parentRollouts.failedRolloutIndices.sorted()}."
+                }
+                logGepaStepOutcome(GEPAStepOutcome.PARENT_ROLLOUTS_FAILED)
+                return@runStageOrThrow
+            }
+            val avgParentScore = parentRollouts.scores.average()
+            logGepaParentBatchScore(avgParentScore)
+
+            if (skipPerfectFeedbackBatches && avgParentScore >= perfectScoreThreshold) {
+                logger.info {
+                    "Skipping feedback batch $batchIndex because the selected parent reached the perfect score."
+                }
+                logGepaStepOutcome(GEPAStepOutcome.PARENT_ALREADY_PERFECT)
+                return@runStageOrThrow
+            }
+
+            val selectedModule = when (moduleSelectionStrategy) {
+                GEPAModuleSelectionStrategy.ROUND_ROBIN ->
+                    modules[candidatePool.advanceNextModuleIndex(parent, modules.size)]
+
+                GEPAModuleSelectionStrategy.ALL -> null
+            }
+            logGepaSelectedModule(selectedModule)
+            val candidate = candidateProposer.proposeCandidate(this, parent, parentRollouts, selectedModule)
+            if (candidate == null) {
+                logGepaStepOutcome(GEPAStepOutcome.NO_MODULE_FEEDBACK)
+                return@runStageOrThrow
+            }
+            if (candidate in candidatePool) {
+                logger.info { "Skipping proposed candidate because it already exists in the candidate pool." }
+                logGepaStepOutcome(GEPAStepOutcome.CANDIDATE_ALREADY_IN_POOL)
+                return@runStageOrThrow
+            }
+
+            val candidateBatchRollouts = runGepaRollouts(
+                candidate = candidate,
+                dataset = batch,
+                stageName = "Evaluate proposed candidate on feedback batch $batchIndex",
+                gepaFeedback = gepaFeedback,
+                failureScore = failureScore,
+                failureRateThreshold = feedbackFailureRateThreshold,
+                abortOnFailureRateExceeded = abortOnFailureRateExceeded,
+            )
+            budget.spend(batch.size)
+            val avgCandidateScore = candidateBatchRollouts.scores.average()
+            logGepaCandidateBatchScore(avgCandidateScore)
+
+            // Only candidates that improve on the feedback batch are evaluated on the validation set.
+            // Failed rollouts get assigned the fallback failureScore
+            if (avgCandidateScore > avgParentScore) {
+                gepaMerge?.notifySuccessfulReflection()
+                val candidateValSetRollouts = runGepaRollouts(
+                    candidate = candidate,
+                    dataset = valSet,
+                    stageName = "Evaluate accepted candidate on validation set for batch $batchIndex",
+                    gepaFeedback = gepaFeedback,
+                    failureScore = failureScore,
+                    failureRateThreshold = validationFailureRateThreshold,
+                    abortOnFailureRateExceeded = abortOnFailureRateExceeded,
+                )
+                candidatePool.add(candidate, listOf(parent), candidateValSetRollouts.scores)
+                budget.spend(valSet.size)
+                logGepaAcceptedCandidate(
+                    candidateId = candidatePool.idOf(candidate),
+                    averageValidationScore = candidateValSetRollouts.scores.average(),
+                )
+                logGepaStepOutcome(GEPAStepOutcome.CANDIDATE_ACCEPTED)
+            } else {
+                logGepaStepOutcome(GEPAStepOutcome.CANDIDATE_REJECTED)
+            }
+        }
+    }
+
+    /**
+     * Attempts one merge: recombines two frontier candidates over their shared ancestor and adds the
+     * result to the pool when it holds up against both parents on a validation subsample.
+     */
+    private suspend fun StageScope<Input, Output, InputLabel>.runMergeAttempt(
+        mergeAttemptIndex: Int,
+        gepaMerge: GEPAMerge,
+        candidatePool: GEPACandidatePool,
+        valSet: TrainSet<Input, InputLabel>,
+        budget: RolloutBudget,
+    ) {
+        runStageOrThrow("Merge attempt $mergeAttemptIndex") {
+            val proposal = gepaMerge.propose()
+            if (proposal == null) {
+                logGepaStepOutcome(GEPAStepOutcome.NO_MERGE_PROPOSAL)
+                return@runStageOrThrow
+            }
+
+            val (firstParent, secondParent) = proposal.parents
+            logGepaMergeProposal(
+                parentIds = proposal.parents.map { parent -> candidatePool.idOf(parent) },
+                ancestorId = candidatePool.idOf(proposal.ancestor),
+            )
+            val validationSubsampleIndices = candidatePool.selectMergeValidationSubsample(
+                firstParent,
+                secondParent,
+                mergeConfig.valSetSubsampleSize,
+            )
+            val validationSubsample = validationSubsampleIndices.sorted().map { valSet[it] }
+
+            val subsampleRollouts = runGepaRollouts(
+                candidate = proposal.candidate,
+                dataset = validationSubsample,
+                stageName = "Evaluate merge proposal on validation set subsample " +
+                        "for merge attempt $mergeAttemptIndex",
+                gepaFeedback = gepaFeedback,
+                failureScore = failureScore,
+                failureRateThreshold = validationFailureRateThreshold,
+                abortOnFailureRateExceeded = abortOnFailureRateExceeded,
+            )
+            budget.spend(validationSubsample.size)
+
+            val firstParentSubsampleScore =
+                candidatePool.sumValidationScores(firstParent, validationSubsampleIndices)
+            val secondParentSubsampleScore =
+                candidatePool.sumValidationScores(secondParent, validationSubsampleIndices)
+            val bestParentSubsampleScore =
+                maxOf(firstParentSubsampleScore, secondParentSubsampleScore)
+            val subsampleScore = subsampleRollouts.scores.sum()
+            logGepaMergeSubsample(validationSubsampleIndices, subsampleScore, bestParentSubsampleScore)
+
+            if (subsampleScore >= bestParentSubsampleScore) {
+                val proposalValSetRollouts = runGepaRollouts(
+                    candidate = proposal.candidate,
+                    dataset = valSet,
+                    stageName = "Evaluate merge proposal on validation set for merge attempt $mergeAttemptIndex",
+                    gepaFeedback = gepaFeedback,
+                    failureScore = failureScore,
+                    failureRateThreshold = validationFailureRateThreshold,
+                    abortOnFailureRateExceeded = abortOnFailureRateExceeded,
+                )
+                candidatePool.add(proposal.candidate, proposal.parents, proposalValSetRollouts.scores)
+                budget.spend(valSet.size)
+                gepaMerge.notifyAcceptedMerge()
+                logGepaAcceptedCandidate(
+                    candidateId = candidatePool.idOf(proposal.candidate),
+                    averageValidationScore = proposalValSetRollouts.scores.average(),
+                )
+                logGepaStepOutcome(GEPAStepOutcome.CANDIDATE_ACCEPTED)
+            } else {
+                logGepaStepOutcome(GEPAStepOutcome.CANDIDATE_REJECTED)
+            }
+        }
+    }
+
+    // TODO: support restarting an interrupted optimization. A restart needs GEPA's own search state,
+    //  most likely written as a separate output file or directory: every candidate's instructions,
+    //  validation scores and parents, plus the rollout budget already spent.
+    /** Writes the pool's best candidate to [storagePath] and returns that candidate's id. */
+    private suspend fun StageScope<Input, Output, InputLabel>.saveBestArtifact(
+        candidatePool: GEPACandidatePool,
+    ): String = runStageOrThrow("Save best artifact") {
+        val (bestCandidate, bestAverageValidationScore) = candidatePool.getBestCandidate()
+        saveArtifact(storagePath, bestCandidate)
+        val bestCandidateId = candidatePool.idOf(bestCandidate)
+        logGepaBestCandidate(
+            bestCandidateId = bestCandidateId,
+            bestAverageValidationScore = bestAverageValidationScore,
+            candidates = candidatePool.summarizeCandidates(),
+            storagePath = storagePath,
+        )
+        bestCandidateId
+    }
 
     @OptIn(InternalAgentsApi::class)
     override fun loadOptimizedAgent(baseAgent: GraphAIAgent<Input, Output>): GraphAIAgent<Input, Output> {
@@ -90,266 +429,39 @@ public class GEPAOptimizer<Input, Output, InputLabel>(
         })
     }
 
-    /**
-     * Builds a tracked reflection proposer from this stage scope. Reflection LLM calls
-     * recorded under the current stage so consumption is captured correctly.
-     */
-    private fun StageScope<*, *, *>.buildReflectionProposer(): GEPAReflectionProposer {
-        val runReflection: GEPAReflectionRunner = { prompt ->
-            executePromptOrThrow(prompt, reflectionModel)
-                .filterIsInstance<Message.Assistant>()
-                .joinToString("\n") { it.content }
-        }
-        return GEPAReflectionProposer(runReflection)
-    }
 
-    @OptIn(InternalAgentsApi::class)
-    override suspend fun train(
-        session: TrainingSession<Input, Output, InputLabel>,
-    ): TrainingResult = session.use(stagesTotal = maxIterations + 1) {
-        val random = Random(randomSeed)
-        val modules = discoverModules(trackedAgent)
-        val frontier = ParetoFrontier(random)
-
-        logger.info { "=== GEPA Optimization ===" }
-        logger.info { "  Modules: ${modules.map { it.name }}" }
-        logger.info { "  Dataset size: ${dataset.size}" }
-        logger.info { "  Max iterations: $maxIterations, minibatch size: $minibatchSize" }
-        logger.info { "  Component selection: $componentSelection, crossover: $enableCrossover" }
-
-        // Step 1: Evaluate baseline
-        logger.info { "Evaluating baseline (no optimization)..." }
-        val baselineScores = evaluateArtifact(OptimizationArtifact(), dataset, name = "Evaluate baseline")
-        val baselineCandidate = ParetoCandidate(
-            artifact = OptimizationArtifact(),
-            perInstanceScores = baselineScores,
-        )
-        frontier.addCandidate(baselineCandidate)
-        logger.info { "  Baseline score: ${"%.4f".format(baselineCandidate.aggregateScore)}" }
-
-        // Step 2: Main evolutionary loop
-        var roundRobinIdx = 0
-        var mergeCount = 0
-        for (iteration in 1..maxIterations) runStageOrThrow("Iteration $iteration") {
-            logger.info { "--- Iteration $iteration/$maxIterations ---" }
-
-            // The proposer is built per-iteration so its tracked LLM calls record under THIS
-            // iteration's stage rather than under the root scope.
-            val reflectionProposer = buildReflectionProposer()
-
-            // Select a parent candidate from a Pareto frontier
-            val parent = frontier.selectCandidate()
-            logger.info { "  Selected parent (score: ${"%.4f".format(parent.aggregateScore)})" }
-
-            // Sample minibatch
-            val minibatch = dataset.shuffled(random).take(minibatchSize)
-
-            // Execute on minibatch, collect failures with traces.
-            // Pre-populate keys for all modules so failures are tracked per-module.
-            // `executeAndCollectFeedback` already creates a named "Collect feedback"
-            // iterateDataset stage internally; no need to wrap it in another runStage.
-            val failures = modules.associate { it.name to mutableListOf<GEPAReflectionProposer.FailureFeedback>() }.toMutableMap()
-            executeAndCollectFeedback(parent.artifact, minibatch, failures)
-
-            if (failures.values.all { it.isEmpty() }) {
-                logger.info { "  No failures on minibatch, skipping reflection." }
-                return@runStageOrThrow // effectively 'continue'
-            }
-
-            // Select which modules to update
-            val modulesToUpdate = when (componentSelection) {
-                ComponentSelection.ALL_AT_ONCE -> modules
-                ComponentSelection.ROUND_ROBIN -> {
-                    val selected = listOf(modules[roundRobinIdx % modules.size])
-                    roundRobinIdx++
-                    selected
-                }
-            }
-            logger.info { "  Updating modules: ${modulesToUpdate.map { it.name }}" }
-
-            // Propose new instructions via reflection.
-            // Each module gets only the failures relevant to it (all failures for now —
-            // per-subgraph trace filtering is a future improvement).
-            var newArtifact = parent.artifact
-            runIterableStageOrThrow(modulesToUpdate, "Propose new instructions") { module ->
-                val moduleFailures = failures[module.name].orEmpty()
-                if (moduleFailures.isNotEmpty()) {
-                    val currentInstruction = getCurrentInstruction(module, parent.artifact)
-                    val proposed = reflectionProposer.proposeInstruction(module, currentInstruction, moduleFailures)
-                    newArtifact = applyInstruction(newArtifact, module.name, proposed)
-                }
-            }
-
-            // Evaluate on minibatch first — only do full dataset eval if improved.
-            // This saves budget: most candidates don't improve on the minibatch.
-            val minibatchScores = evaluateArtifact(newArtifact, minibatch, name = "Evaluate candidate on minibatch")
-            val minibatchScore = if (minibatchScores.isEmpty()) 0.0
-                else minibatchScores.values.sum() / minibatchScores.size
-            val parentMinibatchScore = parent.aggregateScore // approximate comparison
-
-            if (minibatchScore <= parentMinibatchScore) {
-                logger.info { "  Minibatch score ${"%.4f".format(minibatchScore)} did not improve over parent ${"%.4f".format(parentMinibatchScore)}, skipping full eval." }
-                return@runStageOrThrow // essentially 'continue'
-            }
-
-            // Full dataset evaluation for candidates that improved on minibatch
-            logger.info { "  Minibatch improved (${"%.4f".format(minibatchScore)} > ${"%.4f".format(parentMinibatchScore)}), running full eval..." }
-            val newScores = evaluateArtifact(newArtifact, dataset, name = "Evaluate candidate")
-            val newCandidate = ParetoCandidate(
-                artifact = newArtifact,
-                perInstanceScores = newScores,
-                parentIndex = frontier.size() - 1,
-            )
-            frontier.addCandidate(newCandidate)
-            logger.info { "  New candidate score: ${"%.4f".format(newCandidate.aggregateScore)} " +
-                    "(best so far: ${"%.4f".format(frontier.getBestCandidate().aggregateScore)})" }
-
-            // Crossover: attempt to merge complementary candidates from the frontier.
-            // Runs inside the loop so merged candidates can be selected as parents in future iterations.
-            // Conditions: crossover enabled, budget remaining, frontier has at least 2 above-baseline
-            // candidates with different ancestry.
-            if (enableCrossover && mergeCount < maxMergeInvocations && frontier.size() >= 3) {
-                val candidateA = frontier.getBestCandidate()
-                val mergePartner = frontier.getAllCandidates().firstOrNull { other ->
-                    other !== candidateA
-                            && other.aggregateScore > baselineCandidate.aggregateScore
-                            && other.parentIndex != candidateA.parentIndex // disjoint lineage
-                }
-
-                if (mergePartner != null) {
-                    logger.info { "  Attempting crossover (merge #${mergeCount + 1}/$maxMergeInvocations)..." }
-                    var crossedArtifact = candidateA.artifact
-                    runIterableStageOrThrow(modules, "Crossover instructions") { module ->
-                        val instrA = getCurrentInstruction(module, candidateA.artifact)
-                        val instrB = getCurrentInstruction(module, mergePartner.artifact)
-                        if (instrA != instrB) {
-                            val merged = reflectionProposer.proposeCrossover(
-                                module, instrA, candidateA.aggregateScore, instrB, mergePartner.aggregateScore,
-                            )
-                            crossedArtifact = applyInstruction(crossedArtifact, module.name, merged)
-                        }
-                    }
-
-                    val crossedScores = evaluateArtifact(crossedArtifact, dataset, name = "Crossover evaluation")
-                    val crossedCandidate = ParetoCandidate(
-                        artifact = crossedArtifact,
-                        perInstanceScores = crossedScores,
-                    )
-                    frontier.addCandidate(crossedCandidate)
-                    mergeCount++
-                    logger.info { "  Crossover candidate score: ${"%.4f".format(crossedCandidate.aggregateScore)}" }
-                }
-            }
-        }
-
-        // Step 4: Save best artifact
-        val bestCandidate = frontier.getBestCandidate()
-        logger.info { "=== GEPA Complete ===" }
-        logger.info { "  Best score: ${"%.4f".format(bestCandidate.aggregateScore)}" }
-        logger.info { "  Candidates evaluated: ${frontier.size()}" }
-        saveArtifact(storagePath, bestCandidate.artifact)
-        logger.info { "Optimization completed. Artifact saved to ${storagePath.toFilePathLog()}." }
-    }
-
-    /**
-     * Evaluates an artifact on a dataset, returning per-item scores.
-     *
-     * The [name] is forwarded to the inner [iterateDataset] stage; callers can pass a
-     * distinguishing label (e.g. "Evaluate baseline" / "Evaluate candidate") so the
-     * records tree shows what kind of evaluation this is, without an extra wrapping stage.
-     */
-    @OptIn(InternalAgentsApi::class)
-    private suspend fun StageScope<Input, Output, InputLabel>.evaluateArtifact(
-        artifact: OptimizationArtifact,
-        dataset: TrainSet<Input, InputLabel>,
-        name: String = "Evaluate artifact",
-    ): Map<Int, Double> {
-        val scores = mutableMapOf<Int, Double>()
-        val agentWithArtifact = trackedAgent.copyWith(installFeatures = {
-            trackedAgent.installFeatures(this)
-            installPromptOptimization { this.artifact = artifact }
-        })
-        iterateDataset(name = name, dataset = dataset) { item ->
-            val result = runAgent(item, agentWithArtifact)
-            result.onSuccess { scores[dataset.indexOf(item)] = it.score }
-        }
-        return scores
-    }
-
-    /**
-     * Runs the agent on a minibatch, collecting failure traces for reflection.
-     */
-    @OptIn(InternalAgentsApi::class)
-    private suspend fun StageScope<Input, Output, InputLabel>.executeAndCollectFeedback(
-        artifact: OptimizationArtifact,
-        minibatch: TrainSet<Input, InputLabel>,
-        failures: MutableMap<String, MutableList<GEPAReflectionProposer.FailureFeedback>>,
-    ) {
-        val agentWithFeatures = trackedAgent.copyWith(installFeatures = {
-            trackedAgent.installFeatures(this)
-            installPromptOptimization { this.artifact = artifact }
-            collectSubgraphTraces { }
-        })
-        iterateDataset(name = "Collect feedback", dataset = minibatch) { item ->
-            val result = runAgent(item, agentWithFeatures)
-            val agentRun = result.getOrNull()
-            if (agentRun != null && !agentRun.isSolved) {
-                val trajectory = agentRun.usedAgent?.getCollectedTraces()?.getLatestFullPrompt()
-                val feedback = GEPAReflectionProposer.FailureFeedback(
-                    input = item.userQuery.toString(),
-                    expectedLabel = labelExtractor(item),
-                    actualOutput = agentRun.output.toString(),
-                    score = agentRun.score,
-                    trajectory = trajectory ?: error("SubgraphTraceCollectionFeature did not capture a trajectory"),
-                )
-                // Add failure to all modules -- the reflection proposer analyzes
-                // the full trace and targets module-specific improvements.
-                for (list in failures.values) {
-                    list.add(feedback)
-                }
-            }
-        }
-    }
-
-    private fun getCurrentInstruction(module: OptimizableModule, artifact: OptimizationArtifact): String {
-        return if (module.name == STRATEGY_MODULE_KEY) {
-            artifact.strategyInstruction ?: module.currentInstruction
-        } else {
-            artifact.getInstruction(module.name) ?: module.currentInstruction
-        }
-    }
-
-    private fun applyInstruction(artifact: OptimizationArtifact, moduleName: String, instruction: String): OptimizationArtifact {
-        return if (moduleName == STRATEGY_MODULE_KEY) {
-            artifact.withStrategyInstruction(instruction)
-        } else {
-            artifact.withSubgraphInstruction(moduleName, instruction)
-        }
-    }
-
-    /** Persistence helpers for the evolved [OptimizationArtifact]. */
+    /** Utilities for reading GEPA artifacts from persistent storage. */
     public companion object {
         private val jsonFormat = Json { ignoreUnknownKeys = true; prettyPrint = true }
 
-        /**
-         * Serializes [artifact] as pretty-printed JSON and writes it to [storagePath],
-         * creating parent directories as needed.
-         */
-        public fun saveArtifact(storagePath: ResilientPath, artifact: OptimizationArtifact) {
+        private fun saveArtifact(storagePath: ResilientPath, artifact: OptimizationArtifact) {
             storagePath.createParentDirectories()
-            storagePath.writeText(jsonFormat.encodeToString(artifact))
-            logger.info { "GEPA artifact saved to $storagePath" }
+            storagePath.writeText(jsonFormat.encodeToString(OptimizationArtifact.serializer(), artifact))
         }
 
         /**
-         * Reads and deserializes the [OptimizationArtifact] stored at [storagePath].
+         * Loads a previously saved [OptimizationArtifact] from [storagePath].
          *
-         * @throws IllegalArgumentException if no file exists at [storagePath].
+         * @throws IllegalArgumentException when [storagePath] does not exist.
          */
         public fun loadArtifact(storagePath: ResilientPath): OptimizationArtifact {
-            require(storagePath.exists()) { "Cannot load optimization artifact from $storagePath: file does not exist" }
-            return jsonFormat.decodeFromString(storagePath.readText())
+            if (storagePath.exists()) {
+                return jsonFormat.decodeFromString(OptimizationArtifact.serializer(), storagePath.readText())
+            } else {
+                throw IllegalArgumentException("Cannot load artifact from $storagePath: file does not exist")
+            }
         }
     }
 }
 
+/** GEPA's rollout budget: how many candidate evaluations a run may spend, and how many it has spent. */
+private class RolloutBudget(private val total: Int) {
+    var spent: Int = 0
+        private set
+
+    val hasRemaining: Boolean get() = spent < total
+
+    fun spend(rollouts: Int) {
+        spent += rollouts
+    }
+}

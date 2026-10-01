@@ -159,7 +159,7 @@ public class InstructionProposer private constructor(
                                     effectiveUseHistory = effectiveUseHistory,
                                     previousInstructions = previousInstructions,
                                 )
-                                logger.info { "  Candidate ${demoSetIndex + 1}/$numDemoSets for '${module.name}'" }
+                                logger.info { "Candidate ${demoSetIndex + 1}/$numDemoSets for '${module.name}'" }
                                 instruction
                             }
                         }

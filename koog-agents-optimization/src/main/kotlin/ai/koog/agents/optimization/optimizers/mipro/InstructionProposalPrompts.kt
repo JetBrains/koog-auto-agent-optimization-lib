@@ -1,7 +1,7 @@
 package ai.koog.agents.optimization.optimizers.mipro
 
 
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.dsl.prompt
 
 /**

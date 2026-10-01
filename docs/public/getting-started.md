@@ -31,33 +31,15 @@ val executor = MultiLLMPromptExecutor(
 
 ### Install
 
-!!! warning "Install the Koog fork first"
-
-    This library depends on a **fork of Koog** with optimizable-subgraph support
-    (`ai.koog:koog-agents:0.8.0-SNAPSHOT`), not the upstream release. Publish it to your local Maven
-    repository before building:
-
-    ```bash
-    git clone https://github.com/valemore/koog.git
-    cd koog
-    git checkout tags/stable-agent-optimization
-    ./gradlew publishToMavenLocal
-    ```
-
-    (This is expected to merge into [JetBrains/koog](https://github.com/JetBrains/koog) later, after
-    which the fork won't be needed.)
-
-Then add the dependencies — both resolve from `mavenLocal()`:
-
 ```kotlin
 repositories { mavenLocal(); mavenCentral() }
 dependencies {
-    implementation("ai.koog:koog-agents-optimization:0.1.0-SNAPSHOT")
-    implementation("ai.koog:koog-agents:0.8.0-SNAPSHOT") // the Koog fork
+    implementation("ai.koog:koog-agents-optimization:0.1.0-SNAPSHOT") // from mavenLocal
+    implementation("ai.koog:koog-agents:1.1.1")
 }
 ```
 
-The optimization library itself is published to your local Maven repository via
+The optimization library is not on Maven Central yet — publish it to your local Maven repository via
 `./gradlew :koog-agents-optimization:publishToMavenLocal`. See [Overview](index.md) for more.
 
 ## Step 1 — Build the agent
@@ -162,10 +144,13 @@ readable.
 import ai.koog.agents.optimization.common.DatasetExecutionSerializers
 
 val serializers = DatasetExecutionSerializers<String, String, Double>(
-    serializeItem = { it.userQuery },   // how to render a TrainSetItem
-    serializeOutput = { it },           // how to render an agent Output
+    serializeItem = { it.userQuery },         // how to render a TrainSetItem
+    serializeOutput = { it },                 // how to render an agent Output
+    describeItem = { it.userQuery.take(40) }, // short label for log lines and stage names
 )
 ```
+
+`describeItem` defaults to `serializeItem`. Give it something short whenever `serializeItem` renders more than a brief line: an identifier your input already carries, a couple of its fields joined, or a unique prefix of the whole rendering as above.
 
 ## Step 5 — The training session
 

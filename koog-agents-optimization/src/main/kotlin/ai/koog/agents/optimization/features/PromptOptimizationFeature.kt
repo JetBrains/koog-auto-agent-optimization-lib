@@ -10,7 +10,7 @@ import ai.koog.agents.optimization.core.DemonstrationRenderer
 import ai.koog.agents.optimization.core.FewShotPromptType
 import ai.koog.agents.optimization.core.OptimizationArtifact
 import ai.koog.agents.optimization.core.PromptInsertionDefaults
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.message.Message
 
 /**
@@ -119,6 +119,10 @@ public object PromptOptimizationFeature :
     /**
      * Replaces the first system message in the prompt with the given instruction.
      * If no system message exists, the prompt is returned unchanged.
+     *
+     * "First" is the agent-level system prompt, i.e. the `__strategy__` module: this runs at strategy
+     * start, before any subgraph, so the extra system message a fresh optimizable subgraph appends for
+     * its own instruction (see `optimizableSubgraphWithTask`) is never seen, let alone rewritten, here.
      */
     private fun replaceSystemMessage(prompt: Prompt, newInstruction: String): Prompt {
         val messages = prompt.messages

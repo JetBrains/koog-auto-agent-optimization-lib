@@ -2,7 +2,7 @@ package ai.koog.agents.optimization.utils.llm
 
 
 import ai.koog.agents.optimization.utils.common.mapError
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.executor.model.executeStructured
 import ai.koog.prompt.llm.LLModel

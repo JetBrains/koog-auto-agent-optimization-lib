@@ -22,10 +22,7 @@ import ai.koog.agents.optimization.training.records.StageRecord
 import ai.koog.agents.optimization.training.structures.*
 import ai.koog.agents.optimization.utils.serialization.LLMConsumptionOrNA
 import io.github.oshai.kotlinlogging.KLogger
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import kotlinx.serialization.json.*
 import kotlin.time.TimeSource
 
 /**
@@ -51,6 +48,14 @@ public class StageScopeImpl<Input, Output, InputLabel>(
 
     /** The session's dataset, taken from [TrainingResources.dataset]. */
     override val dataset: TrainSet<Input, InputLabel> get() = resources.dataset
+
+    /** The session's failure-rate threshold, taken from [TrainingResources.datasetFailureRateThreshold]. */
+    override val datasetFailureRateThreshold: Double? get() = resources.datasetFailureRateThreshold
+
+    /** Routes optimizer-initiated aborts through the session's shared one-shot controller. */
+    override fun abortExecution(produceException: () -> ExecutionAbortException) {
+        resources.abortController.abort(produceException)
+    }
 
     /**
      * Wall-clock start of this stage. Captured at scope construction, used to refresh
@@ -174,7 +179,7 @@ public class StageScopeImpl<Input, Output, InputLabel>(
 
         val outcome = retryWith(
             policy = activeRetryPolicy,
-            operationLabel = { "agent run for item '${resources.serializers.serializeItem(item)}'" },
+            operationLabel = { "agent run for item `${resources.serializers.describeItem(item)}`" },
             logger = logger,
             analyzeFailure = { exception -> resources.failureAnalyzer.analyzeAgentRunFailure(exception) },
             collectAttemptMetrics = {
@@ -387,8 +392,26 @@ public class StageScopeImpl<Input, Output, InputLabel>(
         if (record.actionLog != null) {
             logger.warn { "Overwriting existing action log! Was: ${json.encodeToString(record.actionLog)}" }
         }
-        record.actionLog = ActionLogBuilder(resources.actionLogTruncation, json).apply(builder).build()
+        record.actionLog = buildActionLog(json, builder)
     }
+
+    override fun appendToActionLog(json: Json, builder: ActionLogBuilder.() -> Unit) {
+        val addition = buildActionLog(json, builder)
+        val existing = record.actionLog as? JsonObject
+        if (existing == null) {
+            record.actionLog = addition
+            return
+        }
+
+        val overwrittenKeys = existing.keys.intersect(addition.keys)
+        if (overwrittenKeys.isNotEmpty()) {
+            logger.warn { "Overwriting action log entries $overwrittenKeys of stage '${record.name}'" }
+        }
+        record.actionLog = JsonObject(existing + addition)
+    }
+
+    private fun buildActionLog(json: Json, builder: ActionLogBuilder.() -> Unit): JsonObject =
+        ActionLogBuilder(resources.actionLogTruncation, json).apply(builder).build()
 
     override fun recordCustomMetric(metric: Metric) {
         record.metrics[metric.key] = metric
@@ -413,7 +436,7 @@ public class StageScopeImpl<Input, Output, InputLabel>(
         name: String,
         dataset: TrainSet<Input, InputLabel>,
         customMetricsToRecord: List<Metric>?,
-        failureRateThreshold: Double,
+        failureRateThreshold: Double?,
         earlyStop: (TrainSetItem<Input, InputLabel>) -> PrematureExecutionStopDecision,
         processItem: suspend StageScope<Input, Output, InputLabel>.(TrainSetItem<Input, InputLabel>) -> Unit,
     ): StageRecord {
@@ -426,7 +449,7 @@ public class StageScopeImpl<Input, Output, InputLabel>(
 
             for ((index, item) in dataset.withIndex()) {
                 val itemIndex = index + 1
-                val itemId = "[$name | Item #$itemIndex / ${dataset.size}]"
+                val itemId = "[$name | Item #$itemIndex / ${dataset.size} · ${resources.serializers.describeItem(item)}]"
                 val serializedItem = resources.serializers.serializeItem(item)
 
                 val (shouldStop, stopReason) = earlyStop(item)
@@ -445,7 +468,7 @@ public class StageScopeImpl<Input, Output, InputLabel>(
             }
 
             val failedRatio = record.metrics[SubstageCountMetric.KEY]!!.failedRatio
-            if (failedRatio.fraction > failureRateThreshold) {
+            if (failureRateThreshold != null && failedRatio.fraction > failureRateThreshold) {
                 throw DatasetMaxFailureRateExceededException(failedRatio, failureRateThreshold)
             }
         }

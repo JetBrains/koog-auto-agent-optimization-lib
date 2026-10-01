@@ -138,7 +138,7 @@ class MyOptimizer<Input, Output, InputLabel>(
             val artifact = buildArtifact(collected)
             saveArtifact(storagePath, artifact)   // persist for reload
             learned = artifact
-            logAction { "collected ${collected.size} examples" }
+            logAction { put("collectedExamples", collected.size) }
         }
     }
 

@@ -11,7 +11,6 @@ import ai.koog.agents.testing.tools.getMockExecutor
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.model.PromptExecutor
-import ai.koog.serialization.typeToken
 import kotlin.test.*
 
 /**
@@ -35,7 +34,7 @@ import kotlin.test.*
  * time. `discoverModules` then filters via `lookupBaseline(...) ?: continue` and
  * reads the real baseline from there.
  */
-class ModuleDiscoveryTest {
+internal class ModuleDiscoveryTest {
 
     private val model = OpenAIModels.Chat.GPT4o
 
@@ -45,8 +44,6 @@ class ModuleDiscoveryTest {
         strategy: AIAgentGraphStrategy<String, String>,
         systemPrompt: String? = null,
     ): GraphAIAgent<String, String> = GraphAIAgent(
-        inputType = typeToken<String>(),
-        outputType = typeToken<String>(),
         promptExecutor = mockExecutor(),
         agentConfig = AIAgentConfig(
             prompt = prompt("test") {
@@ -87,6 +84,10 @@ class ModuleDiscoveryTest {
             classifyModule.currentInstruction,
             "Module's currentInstruction must be the user-supplied optimizableInstruction, " +
                     "not the old placeholder 'Subgraph: <name>'",
+        )
+        assertNull(
+            classifyModule.description,
+            "Subgraph modules should not get description metadata by default",
         )
 
         // Defensive: ensure the placeholder string the old code emitted does not appear anywhere.
@@ -152,10 +153,9 @@ class ModuleDiscoveryTest {
             0, modules.subgraphModules().size,
             "Plain subgraph { } produces a non-optimizable subgraph and must be filtered out",
         )
-        // Strategy module should still be present (it's added unconditionally).
-        assertNotNull(
-            modules.find { it.name == STRATEGY_MODULE_KEY },
-            "Strategy module should always be present regardless of subgraph filtering",
+        assertFalse(
+            modules.any { it.name == STRATEGY_MODULE_KEY },
+            "Strategy module should not be present when the agent has no system prompt",
         )
     }
 
@@ -169,12 +169,18 @@ class ModuleDiscoveryTest {
             nodeStart then task then nodeFinish
         }
 
-        val modules = discoverModules(makeAgent(strategy))
+        val modules = discoverModules(makeAgent(strategy, systemPrompt = "Strategy instruction."))
+        val strategyModule = modules.strategyModule()
 
         assertEquals(
             0, modules.subgraphModules().size,
             "subgraphWithTask is not optimizable (does not consume OptimizationArtifact) " +
                     "and must be filtered out",
+        )
+        assertEquals(
+            "Strategy instruction.",
+            strategyModule.currentInstruction,
+            "Filtering out non-optimizable subgraphs must not remove an explicit strategy module",
         )
     }
 
@@ -220,11 +226,11 @@ class ModuleDiscoveryTest {
             nodeStart then a then b then nodeFinish
         }
 
-        val modules = discoverModules(makeAgent(strategy))
+        val modules = discoverModules(makeAgent(strategy, systemPrompt = "Strategy instruction."))
 
         assertEquals(
             1, modules.size,
-            "When no subgraph is optimizable, only the STRATEGY_MODULE_KEY entry should remain",
+            "When no subgraph is optimizable, only the explicitly present STRATEGY_MODULE_KEY entry should remain",
         )
         assertEquals(STRATEGY_MODULE_KEY, modules.single().name)
     }
@@ -270,20 +276,37 @@ class ModuleDiscoveryTest {
             strategyModule.currentInstruction,
             "STRATEGY_MODULE_KEY's currentInstruction must be the agent's system prompt",
         )
+        assertNull(
+            strategyModule.description,
+            "Strategy modules should not get special description metadata by default",
+        )
     }
 
     @Test
-    fun testStrategyModuleCurrentInstructionIsEmptyWhenNoSystemPrompt() {
+    fun testNoStrategyModuleWhenNoSystemPrompt() {
         val strategy = strategy<String, String>("strat") {
             nodeStart then nodeFinish
         }
 
         val modules = discoverModules(makeAgent(strategy, systemPrompt = null))
 
-        assertEquals(
-            "", modules.strategyModule().currentInstruction,
-            "With no system prompt the strategy module's currentInstruction should be empty " +
-                    "(falls back via `?: \"\"`)",
+        assertFalse(
+            modules.any { it.name == STRATEGY_MODULE_KEY },
+            "With no system prompt, discoverModules should not synthesize an empty strategy module",
+        )
+    }
+
+    @Test
+    fun testNoStrategyModuleWhenSystemPromptIsEmpty() {
+        val strategy = strategy<String, String>("strat") {
+            nodeStart then nodeFinish
+        }
+
+        val modules = discoverModules(makeAgent(strategy, systemPrompt = ""))
+
+        assertFalse(
+            modules.any { it.name == STRATEGY_MODULE_KEY },
+            "With an empty system prompt, discoverModules should not synthesize a strategy module",
         )
     }
 

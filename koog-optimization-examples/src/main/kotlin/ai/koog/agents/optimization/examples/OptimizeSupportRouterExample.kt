@@ -9,12 +9,12 @@ import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.optimization.common.DatasetExecutionSerializers
 import ai.koog.agents.optimization.common.ExperimentName
 import ai.koog.agents.optimization.common.retries.RetryPolicy
+import ai.koog.agents.optimization.core.STRATEGY_MODULE_KEY
 import ai.koog.agents.optimization.core.optimizableSubgraphWithTask
 import ai.koog.agents.optimization.koogTooling.invokeGraphAgent
 import ai.koog.agents.optimization.optimizers.TrainSet
 import ai.koog.agents.optimization.optimizers.TrainSetItem
-import ai.koog.agents.optimization.optimizers.gepa.ComponentSelection
-import ai.koog.agents.optimization.optimizers.gepa.GEPAOptimizer
+import ai.koog.agents.optimization.optimizers.gepa.*
 import ai.koog.agents.optimization.training.*
 import ai.koog.agents.optimization.training.metrics.impl.ConsumptionMetric
 import ai.koog.agents.optimization.utils.common.ResilientPath
@@ -98,7 +98,7 @@ fun main() = runBlocking {
         strategy = supportRouterStrategy(),
     )
 
-    // Labelled tickets. Exact-match metric on the routing code: the vague baseline can't satisfy it.
+    // Labeled tickets. Exact-match metric on the routing code: the vague baseline can't satisfy it.
     val dataset: TrainSet<String, String> = listOf(
         TrainSetItem("I was charged twice for my subscription this month.", "BILLING"),
         TrainSetItem("The app crashes every time I open the settings page.", "TECH"),
@@ -146,16 +146,47 @@ fun main() = runBlocking {
     )
 
     val storagePath = ResilientPath("build/example-artifacts/support_router_gepa.json")
-    // ALL_AT_ONCE so every iteration proposes new instructions for *both* subgraphs together.
+    // ALL so every accepted proposal opportunity updates both subgraphs together.
     val optimizer = GEPAOptimizer<String, String, String>(
+        gepaFeedback = { input, output, gold, fullTrace, subgraphTraces ->
+            val score = metric(TrainSetItem(input, gold), output)
+            val feedbackText = if (score >= 0.9) {
+                "The route was correct. Preserve the exact-code output behavior."
+            } else {
+                "Expected the exact routing code `$gold`, but the agent answered `${output.trim()}`. " +
+                    "The final answer must be only one of BILLING, TECH, or OTHER."
+            }
+            GEPAFeedbackResult(
+                score = score,
+                moduleFeedbacks = buildMap {
+                    if (fullTrace != null) {
+                        put(
+                            STRATEGY_MODULE_KEY,
+                            GEPAModuleFeedbackResult(input = input, output = output, feedbackText = feedbackText),
+                        )
+                    }
+                    subgraphTraces.keys.forEach { moduleName ->
+                        put(
+                            moduleName,
+                            GEPAModuleFeedbackResult(input = input, output = output, feedbackText = feedbackText),
+                        )
+                    }
+                },
+            )
+        },
+        feedbackValSplitFn = { trainSet ->
+            val validationSize = (trainSet.size / 2).coerceIn(1, trainSet.lastIndex)
+            GEPATrainSetSplit(
+                feedbackSet = trainSet.drop(validationSize),
+                validationSet = trainSet.take(validationSize),
+            )
+        },
         reflectionModel = OpenAIModels.Chat.GPT4oMini,
         storagePath = storagePath,
-        maxIterations = 3,
-        minibatchSize = 6,
-        componentSelection = ComponentSelection.ALL_AT_ONCE,
-        enableCrossover = false,
+        numRollouts = 12,
+        feedbackBatchSize = 3,
+        moduleSelectionStrategy = GEPAModuleSelectionStrategy.ALL,
         randomSeed = 42,
-        labelExtractor = { it.itemLabel },
     )
 
     // Before: the unoptimized agent on a held-out ticket

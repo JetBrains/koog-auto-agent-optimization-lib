@@ -4,7 +4,7 @@ package ai.koog.agents.optimization.common.abort
 /**
  * Per-execution gate that lets exactly one [ExecutionAbortException] escape an experiment
  * execution. Construct one per training session / evaluation run and share it with every
- * [AbortPolicy].
+ * [AbortPolicy] and optimizer-facing stage scope.
  *
  * Not thread-safe — a plain `Boolean` flag is enough for the single-dispatcher runner loop.
  */

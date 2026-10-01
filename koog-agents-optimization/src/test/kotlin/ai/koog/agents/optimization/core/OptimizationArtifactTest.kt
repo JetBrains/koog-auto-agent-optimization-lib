@@ -5,7 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
-class OptimizationArtifactTest {
+internal class OptimizationArtifactTest {
 
     private val json = Json { prettyPrint = true }
 

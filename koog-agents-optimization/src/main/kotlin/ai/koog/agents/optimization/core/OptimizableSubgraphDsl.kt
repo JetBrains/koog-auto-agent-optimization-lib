@@ -1,6 +1,5 @@
 package ai.koog.agents.optimization.core
 
-import ai.koog.agents.core.agent.ToolCalls
 import ai.koog.agents.core.agent.context.AIAgentGraphContextBase
 import ai.koog.agents.core.agent.entity.AIAgentSubgraph
 import ai.koog.agents.core.agent.entity.ToolSelectionStrategy
@@ -108,16 +107,17 @@ public class OptimizableSubgraphDelegate<Input, Output> @PublishedApi internal c
  * @param toolSelectionStrategy Strategy for selecting available tools.
  * @param llmModel Optional LLM model override.
  * @param llmParams Optional LLM parameters override.
- * @param runMode Tool execution mode (sequential, parallel, single-run).
+ * @param parallelTools Whether the subgraph may execute tool calls in parallel.
  * @param assistantResponseRepeatMax Max retries when the model doesn't call tools.
  * @param responseProcessor Optional post-processing of LLM responses.
- * @param freshHistory When true, the subgraph starts with an empty conversation history.
+ * @param freshHistory When true, the subgraph drops the parent's conversation turns but keeps the
+ *   parent's system messages. The module instruction is appended as one more system message after the inherited ones.
  * @param fewShotPromptType How demos are inserted. Null inherits from [PromptInsertionDefaults] in storage.
  * @param demonstrationFormat Detail level for demos. Null inherits from [PromptInsertionDefaults] in storage.
  * @param defineTask Lambda that composes the user query from the resolved instruction and input.
- *   For fresh history, the resolved instruction is also placed as the system message separately,
+ *   For fresh history, the resolved instruction is also placed as its own system message separately,
  *   so demonstrations are sandwiched between the instruction and the query:
- *   `system(instruction) → demos → user(defineTask(instruction, input)) → LLM response`.
+ *   `[inherited system messages] → system(instruction) → demos → user(defineTask(instruction, input)) → LLM`.
  *   The instruction is available in the lambda for convenience — if used, it will appear in both
  *   the system message and the user query (which is fine, it reinforces the instruction).
  * @return A delegate for use with Kotlin property delegation (`by`).
@@ -130,7 +130,7 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
     toolSelectionStrategy: ToolSelectionStrategy = ToolSelectionStrategy.ALL,
     llmModel: LLModel? = null,
     llmParams: LLMParams? = null,
-    runMode: ToolCalls = ToolCalls.SEQUENTIAL,
+    parallelTools: Boolean = false,
     assistantResponseRepeatMax: Int? = null,
     responseProcessor: ResponseProcessor? = null,
     freshHistory: Boolean = false,
@@ -153,18 +153,14 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
             finishTool = finishTool,
             inputType = typeToken<Input>(),
             outputTransformedType = typeToken<Output>(),
-            runMode = runMode,
+            parallelTools = parallelTools,
             assistantResponseRepeatMax = assistantResponseRepeatMax,
-            // We always handle the system message ourselves inside defineTask, so the inner
-            // setup never needs its own freshHistory semantics. Context isolation is provided
-            // by the outer subgraph(freshHistory = ...) above.
-            freshHistory = false,
 
             // Resolve instruction + inject demonstrations directly into the LLM context.
             //
             // Prompt ordering:
-            //   Fresh:     system(instruction) → demos → user(defineTask(instruction, input)) → LLM
-            //   Non-fresh: [inherited] → demos → user(defineTask(instruction, input)) → LLM
+            //   Fresh:     [parent systems] → system(instruction) → demos → user(defineTask(...)) → LLM
+            //   Non-fresh: [inherited]                            → demos → user(defineTask(...)) → LLM
             defineTask = defineTask@{ input ->
                 val subgraphName = nameHolder.name
                     ?: error("Optimizable subgraph name was not resolved. This is a framework bug.")
@@ -185,6 +181,11 @@ public inline fun <reified Input, reified Output> AIAgentSubgraphBuilderBase<*, 
                 llm.writeSession {
                     appendPrompt {
                         if (freshHistory) {
+                            // Since koog 1.1.1 a fresh subgraph inherits the parent's system messages and
+                            // only drops the conversation turns. We leave the parent's alone — it belongs to
+                            // the `__strategy__` module — and append the module instruction as a second
+                            // system message. It must stay a system message: SubgraphTraceCollectionFeature
+                            // drops leading ones, which is what keeps the instruction out of mined demos.
                             system(effectiveInstruction)
                         }
 

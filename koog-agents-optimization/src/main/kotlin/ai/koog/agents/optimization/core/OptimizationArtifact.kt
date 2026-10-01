@@ -1,5 +1,6 @@
 package ai.koog.agents.optimization.core
 
+import ai.koog.agents.core.agent.GraphAIAgent
 import ai.koog.agents.core.agent.entity.AIAgentStorageKey
 import ai.koog.agents.core.agent.entity.createStorageKey
 import kotlinx.serialization.Serializable
@@ -82,4 +83,24 @@ public data class OptimizationArtifact(
         public val STORAGE_KEY: AIAgentStorageKey<OptimizationArtifact> =
             createStorageKey("optimization-artifact")
     }
+}
+
+/**
+ * Builds an [OptimizationArtifact] containing the current strategy and optimizable-subgraph instructions of [agent].
+ */
+public fun <Input, Output> initialArtifactOf(
+    agent: GraphAIAgent<Input, Output>,
+): OptimizationArtifact {
+    var artifact = OptimizationArtifact()
+
+    for (module in discoverModules(agent)) {
+        artifact =
+            if (module.name == STRATEGY_MODULE_KEY) {
+                artifact.withStrategyInstruction(module.currentInstruction)
+            } else {
+                artifact.withSubgraphInstruction(module.name, module.currentInstruction)
+            }
+    }
+
+    return artifact
 }

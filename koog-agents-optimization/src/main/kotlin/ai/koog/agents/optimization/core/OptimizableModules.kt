@@ -28,8 +28,8 @@ public data class OptimizableModule(
 )
 
 /**
- * Discovers optimizable modules in an agent: the strategy-level system prompt plus any
- * subgraphs created via [optimizableSubgraphWithTask].
+ * Discovers optimizable modules in an agent: the strategy-level system prompt, when present and
+ * non-empty, plus any subgraphs created via [optimizableSubgraphWithTask].
  *
  * Non-optimizable subgraphs — those created via plain `subgraph { }` or `subgraphWithTask` —
  * are filtered out, since their runtime does not consume an [OptimizationArtifact] and any
@@ -39,20 +39,29 @@ public data class OptimizableModule(
  * via [OptimizableSubgraphDelegate.lookupBaseline], populated at strategy-construction
  * time by [OptimizableSubgraphDelegate.getValue].
  *
- * @return The strategy-level module first, followed by one module per optimizable subgraph
- *   in graph-traversal order.
+ * The system message read below is the agent-level one, and it is the only one that exists at
+ * discovery time. Since koog 1.1.1 fresh subgraphs inherit it, so `__strategy__` and the subgraph
+ * modules are no longer independent: optimizing the strategy instruction changes the context every
+ * optimizable subgraph runs in, and per-module scores are not separable.
+ *
+ * @return The strategy-level module first when the agent has a non-empty system prompt, followed
+ *   by one module per optimizable subgraph in graph-traversal order.
  */
 public fun <Input, Output> discoverModules(agent: GraphAIAgent<Input, Output>): List<OptimizableModule> {
     val modules = mutableListOf<OptimizableModule>()
 
-    val systemPrompt = agent.agentConfig.prompt.messages
+    val systemInstruction = agent.agentConfig.prompt.messages
         .filterIsInstance<Message.System>()
-        .firstOrNull()?.content ?: ""
-    modules.add(OptimizableModule(
-        name = STRATEGY_MODULE_KEY,
-        currentInstruction = systemPrompt,
-        description = "Strategy-level system prompt for the agent.",
-    ))
+        .firstOrNull()
+        ?.textContent()
+    if (!systemInstruction.isNullOrEmpty()) {
+        modules.add(
+            OptimizableModule(
+                name = STRATEGY_MODULE_KEY,
+                currentInstruction = systemInstruction,
+            )
+        )
+    }
 
     for (subgraph in agent.strategy.findAllSubgraphs()) {
         val baseline = OptimizableSubgraphDelegate.lookupBaseline(subgraph) ?: continue

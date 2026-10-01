@@ -3,9 +3,8 @@ package ai.koog.agents.optimization.optimizers.mipro
 
 import ai.koog.agents.optimization.training.dsl.StageScope
 import ai.koog.agents.optimization.training.dsl.executePrompt
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.llm.LLModel
-import ai.koog.prompt.message.Message
 import io.github.oshai.kotlinlogging.KotlinLogging
 
 private val logger = KotlinLogging.logger {}
@@ -28,12 +27,7 @@ internal typealias MetaPromptRunner = suspend (prompt: Prompt) -> String?
  */
 internal fun StageScope<*, *, *>.metaPromptRunner(model: LLModel): MetaPromptRunner = { prompt ->
     executePrompt(prompt, model).fold(
-        onSuccess = { responses ->
-            responses.filterIsInstance<Message.Assistant>()
-                .firstOrNull()
-                ?.content
-                ?.takeIf { it.isNotBlank() }
-        },
+        onSuccess = { response -> response.textContent().takeIf { it.isNotBlank() } },
         onFailure = { e ->
             logger.debug(e) { "Meta-LLM call failed for prompt '${prompt.id}'" }
             null

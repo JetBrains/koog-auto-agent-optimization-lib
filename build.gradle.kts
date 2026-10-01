@@ -6,8 +6,6 @@ plugins {
 
 allprojects {
     repositories {
-        // The Koog fork (ai.koog:*:0.8.0-SNAPSHOT) is published here; see the README.
-        mavenLocal()
         mavenCentral()
     }
 }

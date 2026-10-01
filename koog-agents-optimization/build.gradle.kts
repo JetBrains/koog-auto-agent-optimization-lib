@@ -15,6 +15,8 @@ dependencies {
 
     testImplementation(kotlin("test"))
     testImplementation(libs.koog.test)
+    // Already on the test runtime classpath through koog; declared so tests can attach a log appender.
+    testImplementation(libs.logback)
 }
 
 kotlin {

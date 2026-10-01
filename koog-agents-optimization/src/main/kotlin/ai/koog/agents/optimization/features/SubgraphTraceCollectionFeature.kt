@@ -3,6 +3,7 @@ package ai.koog.agents.optimization.features
 import ai.koog.agents.core.agent.GraphAIAgent.FeatureContext
 import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.agent.entity.AIAgentStorageKey
+import ai.koog.agents.core.agent.entity.createStorageKey
 import ai.koog.agents.core.feature.AIAgentGraphFeature
 import ai.koog.agents.core.feature.config.FeatureConfig
 import ai.koog.agents.core.feature.pipeline.AIAgentGraphPipeline
@@ -10,9 +11,11 @@ import ai.koog.agents.core.tools.annotations.InternalAgentToolsApi
 import ai.koog.agents.ext.agent.SubgraphWithTaskUtils
 import ai.koog.agents.optimization.core.Demonstration
 import ai.koog.agents.optimization.core.DemonstrationRenderer
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.agents.optimization.utils.messages.withParts
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.message.Message
+import ai.koog.prompt.message.MessagePart
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -77,14 +80,14 @@ public class CollectedSubgraphTraces(
     internal suspend fun onLLMCallCompleted(
         runId: String,
         currentPrompt: Prompt,
-        responses: List<Message.Response>,
+        response: Message.Assistant,
     ) {
         mutex.withLock {
             val active = activeStacks[runId]?.lastOrNull()
             if (active != null) {
-                latestSnapshotByRunSubgraph[runId to active] = currentPrompt.messages + responses
+                latestSnapshotByRunSubgraph[runId to active] = currentPrompt.messages + response
             }
-            latestFullPrompt = prompt(currentPrompt) { messages(responses) }
+            latestFullPrompt = prompt(currentPrompt) { messages(listOf(response)) }
         }
     }
 
@@ -157,9 +160,9 @@ public class CollectedSubgraphTraces(
 }
 
 /**
- * Strips the inherited prefix, drops the leading system message, converts the finalize
- * tool call to a plain Assistant message, and drops the finalize tool result. The result
- * is the subgraph's own conversation in a shape suitable for use as a few-shot demonstration.
+ * Strips the inherited prefix, drops the leading system messages, converts the finalize
+ * tool call into plain text, and drops the finalize tool result. The result is the
+ * subgraph's own conversation in a shape suitable for use as a few-shot demonstration.
  */
 @OptIn(InternalAgentToolsApi::class)
 private fun cleanCapturedMessages(
@@ -168,16 +171,26 @@ private fun cleanCapturedMessages(
 ): List<Message> {
     val subgraphOnly = DemonstrationRenderer.dropInheritedPrefix(allMessages, inherited)
     return subgraphOnly
+        // Two kinds of system messages sit at the head of a fresh subgraph's prompt: the parent's
+        // (inherited since koog 1.1.1, already gone with the prefix) and the module instruction that
+        // `optimizableSubgraphWithTask` appends. Both must stay out of demonstrations: under FULL_TRACE
+        // these messages are replayed verbatim, so a captured instruction would later be shown next to
+        // a newer candidate instruction.
         .dropWhile { it is Message.System }
-        .map { msg ->
-            if (msg is Message.Tool.Call && msg.tool == SubgraphWithTaskUtils.FINALIZE_SUBGRAPH_TOOL_NAME) {
-                Message.Assistant(msg.content, msg.metaInfo)
-            } else {
-                msg
+        .mapNotNull { msg ->
+            val kept = msg.parts.mapNotNull { part ->
+                when {
+                    part !is MessagePart.Tool -> part
+                    part.tool != SubgraphWithTaskUtils.FINALIZE_SUBGRAPH_TOOL_NAME -> part
+                    part is MessagePart.Tool.Call -> MessagePart.Text(part.args)
+                    else -> null
+                }
             }
-        }
-        .filter { msg ->
-            !(msg is Message.Tool.Result && msg.tool == SubgraphWithTaskUtils.FINALIZE_SUBGRAPH_TOOL_NAME)
+            when {
+                kept == msg.parts -> msg
+                kept.isEmpty() -> null
+                else -> msg.withParts(kept)
+            }
         }
 }
 
@@ -199,7 +212,7 @@ public object SubgraphTraceCollectionFeature :
 
     /** Storage key under which the [CollectedSubgraphTraces] container is published. */
     override val key: AIAgentStorageKey<CollectedSubgraphTraces> =
-        AIAgentStorageKey("optimization-subgraph-trace-collection")
+        createStorageKey("optimization-subgraph-trace-collection")
 
     /** Creates the default [SubgraphTraceCollectionConfig]. */
     override fun createInitialConfig(agentConfig: AIAgentConfig): SubgraphTraceCollectionConfig =
@@ -222,10 +235,12 @@ public object SubgraphTraceCollectionFeature :
         }
 
         pipeline.interceptLLMCallCompleted(this) { eventContext ->
+            // A moderation-only call completes without an assistant response; nothing to record.
+            val response = eventContext.response ?: return@interceptLLMCallCompleted
             collected.onLLMCallCompleted(
                 runId = eventContext.runId,
                 currentPrompt = eventContext.prompt,
-                responses = eventContext.responses,
+                response = response,
             )
         }
 

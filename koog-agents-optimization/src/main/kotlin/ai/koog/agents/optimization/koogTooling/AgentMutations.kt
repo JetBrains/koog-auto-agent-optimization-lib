@@ -7,11 +7,10 @@ import ai.koog.agents.core.agent.config.MissingToolsConversionStrategy
 import ai.koog.agents.core.agent.entity.AIAgentGraphStrategy
 import ai.koog.agents.core.annotation.InternalAgentsApi
 import ai.koog.agents.core.tools.ToolRegistry
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
-import ai.koog.serialization.TypeToken
-import kotlin.time.Clock
+import ai.koog.utils.time.KoogClock
 
 /**
  * Copies this agent and runs the copy on [input].
@@ -60,20 +59,16 @@ public fun AIAgentConfig.copyWith(
 @OptIn(InternalAgentsApi::class)
 @Suppress("UNCHECKED_CAST")
 public fun <Input, Output> GraphAIAgent<Input, Output>.copyWith(
-    inputType: TypeToken = this.inputType,
-    outputType: TypeToken = this.outputType,
     promptExecutor: PromptExecutor = this.promptExecutor,
     agentConfig: AIAgentConfig = this.agentConfig,
     id: String = this.id,
     toolRegistry: ToolRegistry = this.toolRegistry,
-    clock: Clock = this.clock,
+    clock: KoogClock = this.clock,
     installFeatures: GraphAIAgent.FeatureContext.() -> Unit = this.installFeatures,
     strategy: AIAgentGraphStrategy<Input, Output> = this.strategy,
 ): GraphAIAgent<Input, Output> {
 
     return GraphAIAgent(
-        inputType = inputType,
-        outputType = outputType,
         promptExecutor = promptExecutor,
         strategy = strategy,
         agentConfig = agentConfig,

@@ -3,6 +3,7 @@ package ai.koog.agents.optimization.training
 
 import ai.koog.agents.core.agent.GraphAIAgent
 import ai.koog.agents.optimization.common.DatasetExecutionSerializers
+import ai.koog.agents.optimization.common.abort.AbortController
 import ai.koog.agents.optimization.common.retries.RetryPolicy
 import ai.koog.agents.optimization.consumption.LLMConsumption
 import ai.koog.agents.optimization.optimizers.TrainSet
@@ -15,7 +16,7 @@ import ai.koog.prompt.executor.model.PromptExecutor
  * Holds the tracked agent, the injected execution collaborators (consumption capture, failure
  * analysis, per-item context, agent invocation), and configuration shared across all scope instances.
  *
- * These collaborators ([failureAnalyzer], [consumptionCollector], [capturingExecutorFactory],
+ * These collaborators ([failureAnalyzer], [abortController], [consumptionCollector], [capturingExecutorFactory],
  * [runAgentAttempt], [withItemContext]) are supplied by the app; the defaults make the resources
  * usable on their own (no consumption, no provider-specific recognition, plain agent runs).
  */
@@ -35,6 +36,11 @@ public class TrainingResources<Input, Output, InputLabel>(
     /** Truncation applied to action-log strings recorded during the session. */
     public val actionLogTruncation: ActionLogTruncation,
     /**
+     * Failed-item ratio above which a dataset iteration is marked as failed, used as the default
+     * for `StageScope.iterateDataset`. `null` tolerates any failure rate.
+     */
+    public val datasetFailureRateThreshold: Double? = 0.9,
+    /**
      * Session-level retry policy applied inside leaf primitives (`runAgent` /
      * `executeWithTrackedPromptExecutor`).
      */
@@ -43,6 +49,8 @@ public class TrainingResources<Input, Output, InputLabel>(
     public val failureAnalyzer: FailureAnalyzer,
     /** Wraps a delegate executor into a consumption-capturing one, created once per leaf prompt call. */
     public val capturingExecutorFactory: (PromptExecutor) -> CapturingPromptExecutor,
+    /** Shared one-shot controller used by every abort source in this training session. */
+    public val abortController: AbortController = AbortController(),
     /** Returns the consumption accumulated by the tracked agent since the last call (cleared each call). */
     public val consumptionCollector: () -> LLMConsumption? = { null },
     /** Runs one agent attempt; returns the (possibly re-prepared) agent and its output. */

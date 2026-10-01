@@ -1,7 +1,6 @@
 package ai.koog.agents.optimization.core
 
 import ai.koog.agents.core.agent.AIAgent
-import ai.koog.agents.core.agent.ToolCalls
 import ai.koog.agents.core.agent.config.AIAgentConfig
 import ai.koog.agents.core.dsl.builder.strategy
 import ai.koog.agents.core.dsl.builder.subgraph
@@ -12,8 +11,10 @@ import ai.koog.agents.optimization.features.CollectedSubgraphTraces
 import ai.koog.agents.optimization.features.SubgraphTraceCollectionFeature
 import ai.koog.agents.optimization.features.collectSubgraphTraces
 import ai.koog.agents.optimization.features.installPromptOptimization
+import ai.koog.agents.optimization.utils.messages.hasToolCalls
+import ai.koog.agents.optimization.utils.messages.hasToolResults
 import ai.koog.agents.testing.tools.getMockExecutor
-import ai.koog.prompt.dsl.Prompt
+import ai.koog.prompt.Prompt
 import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
 import ai.koog.prompt.executor.model.PromptExecutor
@@ -25,7 +26,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class OptimizableSubgraphTest {
+internal class OptimizableSubgraphTest {
 
     private val model = OpenAIModels.Chat.GPT4o
 
@@ -52,7 +53,6 @@ class OptimizableSubgraphTest {
                 freshHistory = freshHistory,
                 fewShotPromptType = fewShotPromptType,
                 demonstrationFormat = demonstrationFormat,
-                runMode = ToolCalls.SEQUENTIAL,
             ) { instruction, input -> "$instruction\nInput: $input" }
 
             nodeStart then classify then nodeFinish
@@ -99,7 +99,7 @@ class OptimizableSubgraphTest {
 
         val firstPrompt = prompts.first()
         assertTrue(
-            firstPrompt.messages.any { it.content.contains("Classify the sentiment.") },
+            firstPrompt.messages.any { it.textContent().contains("Classify the sentiment.") },
             "Should use default instruction when no config installed"
         )
     }
@@ -118,8 +118,8 @@ class OptimizableSubgraphTest {
         ).use { it.run("hello") }
 
         val firstPrompt = prompts.first()
-        assertTrue(firstPrompt.messages.any { it.content.contains("Default instruction.") })
-        assertTrue(firstPrompt.messages.none { it.content.contains("Should not appear") })
+        assertTrue(firstPrompt.messages.any { it.textContent().contains("Default instruction.") })
+        assertTrue(firstPrompt.messages.none { it.textContent().contains("Should not appear") })
     }
 
     @Test
@@ -137,27 +137,31 @@ class OptimizableSubgraphTest {
 
         val firstPrompt = prompts.first()
         assertTrue(
-            firstPrompt.messages.any { it.content.contains("Optimized: classify with care.") },
+            firstPrompt.messages.any { it.textContent().contains("Optimized: classify with care.") },
             "Should use optimized instruction from config"
         )
         assertTrue(
-            firstPrompt.messages.none { it.content.contains("Default instruction.") },
+            firstPrompt.messages.none { it.textContent().contains("Default instruction.") },
             "Default instruction should not appear when config overrides it"
         )
     }
 
     @Test
-    fun testFreshHistoryStartsWithEmptyPromptAndSystemMessage() = runBlocking {
+    fun testFreshHistoryKeepsParentSystemMessageAndAppendsInstruction() = runBlocking {
         val prompts = mutableListOf<Prompt>()
 
         createAgent(freshHistory = true, capturedPrompts = prompts).use { it.run("test input") }
 
         val firstPrompt = prompts.first()
         val messages = firstPrompt.messages
+        // Since koog 1.1.1 a fresh subgraph inherits the parent's system messages and only drops the
+        // conversation turns, so the module instruction is a second system message. Deliberate.
         val systemMessages = messages.filterIsInstance<Message.System>()
-        assertEquals(1, systemMessages.size, "Expected one system message from defineTask")
-        assertTrue(messages.none { it.content.contains("Parent system prompt") })
-        assertTrue(messages.none { it.content.contains("Prior conversation") })
+        assertEquals(2, systemMessages.size, "Expected the parent system message plus the module instruction")
+        assertTrue(systemMessages[0].textContent().contains("Parent system prompt"))
+        assertTrue(systemMessages[1].textContent().contains("Default instruction."))
+        assertTrue(messages.none { it.textContent().contains("Prior conversation") })
+        assertTrue(messages.none { it.textContent().contains("Prior response") })
     }
 
     @Test
@@ -169,10 +173,10 @@ class OptimizableSubgraphTest {
         val firstPrompt = prompts.first()
         val messages = firstPrompt.messages
         assertTrue(messages.filterIsInstance<Message.System>().any {
-            it.content.contains("Parent system prompt")
+            it.textContent().contains("Parent system prompt")
         })
         assertTrue(messages.filterIsInstance<Message.User>().any {
-            it.content.contains("Default instruction.")
+            it.textContent().contains("Default instruction.")
         })
     }
 
@@ -198,10 +202,10 @@ class OptimizableSubgraphTest {
         assertTrue(messages.first() is Message.System)
 
         // Demo user/assistant pairs should be present
-        assertTrue(messages.filterIsInstance<Message.User>().any { it.content == "example input" })
-        assertTrue(messages.filterIsInstance<Message.Assistant>().any { it.content == "example output" })
-        assertTrue(messages.filterIsInstance<Message.User>().any { it.content == "another input" })
-        assertTrue(messages.filterIsInstance<Message.Assistant>().any { it.content == "another output" })
+        assertTrue(messages.filterIsInstance<Message.User>().any { it.textContent() == "example input" })
+        assertTrue(messages.filterIsInstance<Message.Assistant>().any { it.textContent() == "example output" })
+        assertTrue(messages.filterIsInstance<Message.User>().any { it.textContent() == "another input" })
+        assertTrue(messages.filterIsInstance<Message.Assistant>().any { it.textContent() == "another output" })
     }
 
     @Test
@@ -220,7 +224,7 @@ class OptimizableSubgraphTest {
         val userMessages = firstPrompt.messages.filterIsInstance<Message.User>()
         assertTrue(
             userMessages.any {
-                it.content.contains("Input: example input") && it.content.contains("Output: example output")
+                it.textContent().contains("Input: example input") && it.textContent().contains("Output: example output")
             },
             "AS_STRING should produce a single user message with rendered demos"
         )
@@ -240,7 +244,7 @@ class OptimizableSubgraphTest {
 
         val firstPrompt = prompts.first()
         assertTrue(
-            firstPrompt.messages.none { it.content.contains("x") },
+            firstPrompt.messages.none { it.textContent().contains("x") },
             "Demos for other subgraph should not leak into this subgraph"
         )
     }
@@ -261,13 +265,13 @@ class OptimizableSubgraphTest {
         val messages = firstPrompt.messages
 
         assertTrue(messages.filterIsInstance<Message.System>().any {
-            it.content.contains("Parent system prompt")
+            it.textContent().contains("Parent system prompt")
         }, "Parent system prompt should be preserved")
         assertTrue(messages.filterIsInstance<Message.User>().any {
-            it.content == "demo-in"
+            it.textContent() == "demo-in"
         }, "Demo should be injected")
         assertTrue(messages.filterIsInstance<Message.Assistant>().any {
-            it.content == "demo-out"
+            it.textContent() == "demo-out"
         }, "Demo should be injected")
     }
 
@@ -286,9 +290,9 @@ class OptimizableSubgraphTest {
         val messages = prompts.first().messages
 
         // Find indices: demo user message and the actual query user message
-        val demoIndex = messages.indexOfFirst { it is Message.User && it.content == "demo-input" }
+        val demoIndex = messages.indexOfFirst { it is Message.User && it.textContent() == "demo-input" }
         val queryIndex = messages.indexOfFirst {
-            it is Message.User && it.content.contains("real query")
+            it is Message.User && it.textContent().contains("real query")
         }
 
         assertTrue(demoIndex >= 0, "Demo user message should be present")
@@ -303,7 +307,7 @@ class OptimizableSubgraphTest {
     @Test
     fun testFreshHistoryDemoOrderingInstructionThenDemosThenQuery() = runBlocking {
         // With freshHistory=true, the prompt should be:
-        //   system(instruction) → demos → user(defineTask(instruction, input)) → LLM
+        //   system(parent) → system(instruction) → demos → user(defineTask(instruction, input)) → LLM
         val prompts = mutableListOf<Prompt>()
         val demos = listOf(Demonstration("demo-input", "demo-output"))
 
@@ -316,22 +320,23 @@ class OptimizableSubgraphTest {
 
         val messages = prompts.first().messages
 
-        // System message should contain the instruction but the query appears
-        // as a separate user message after demos
-        val systemMsg = messages.first()
-        assertTrue(systemMsg is Message.System, "First message should be system")
-        assertTrue(
-            systemMsg.content.contains("Default instruction"),
-            "System message should contain the instruction"
-        )
+        // The inherited parent system message comes first, the instruction is a system message of
+        // its own after it, and the query is a separate user message after the demos.
+        assertTrue(messages.first() is Message.System, "First message should be the inherited system message")
+        assertTrue(messages.first().textContent().contains("Parent system prompt"))
 
-        // Demo should come after the system message
-        val demoIndex = messages.indexOfFirst { it is Message.User && it.content == "demo-input" }
-        assertTrue(demoIndex > 0, "Demo should appear after the system message")
+        val instructionIndex = messages.indexOfFirst {
+            it is Message.System && it.textContent().contains("Default instruction")
+        }
+        assertTrue(instructionIndex > 0, "Instruction should be a system message after the inherited one")
+
+        // Demo should come after the instruction
+        val demoIndex = messages.indexOfFirst { it is Message.User && it.textContent() == "demo-input" }
+        assertTrue(demoIndex > instructionIndex, "Demo should appear after the instruction")
 
         // Query user message should come after demos
         val queryIndex = messages.indexOfFirst {
-            it is Message.User && it.content.contains("real query")
+            it is Message.User && it.textContent().contains("real query")
         }
         assertTrue(queryIndex > demoIndex,
             "Query should appear after demos (demo at $demoIndex, query at $queryIndex)")
@@ -350,7 +355,7 @@ class OptimizableSubgraphTest {
         ).use { it.run("test") }
 
         assertTrue(
-            prompts.first().messages.any { it.content.contains("Name-resolved instruction") },
+            prompts.first().messages.any { it.textContent().contains("Name-resolved instruction") },
             "Subgraph should resolve its name from the property name for config lookup"
         )
     }
@@ -385,7 +390,7 @@ class OptimizableSubgraphTest {
         ).use { it.run("input") }
 
         assertTrue(
-            prompts.first().messages.any { it.content.contains("Custom instruction") },
+            prompts.first().messages.any { it.textContent().contains("Custom instruction") },
             "Should use explicit name 'custom-name' for config lookup, not property name 'myProperty'"
         )
     }
@@ -427,10 +432,10 @@ class OptimizableSubgraphTest {
         ).use { it.run("input") }
 
         assertTrue(prompts.size >= 2, "Expected at least two LLM calls")
-        assertTrue(prompts[0].messages.any { it.content.contains("Optimized first") })
-        assertTrue(prompts[0].messages.none { it.content.contains("Optimized second") })
-        assertTrue(prompts[1].messages.any { it.content.contains("Optimized second") })
-        assertTrue(prompts[1].messages.none { it.content.contains("Optimized first") })
+        assertTrue(prompts[0].messages.any { it.textContent().contains("Optimized first") })
+        assertTrue(prompts[0].messages.none { it.textContent().contains("Optimized second") })
+        assertTrue(prompts[1].messages.any { it.textContent().contains("Optimized second") })
+        assertTrue(prompts[1].messages.none { it.textContent().contains("Optimized first") })
     }
 
     @Test
@@ -468,9 +473,9 @@ class OptimizableSubgraphTest {
             },
         ).use { it.run("input") }
 
-        assertTrue(prompts[0].messages.any { it.content.contains("first-demo-in") },
+        assertTrue(prompts[0].messages.any { it.textContent().contains("first-demo-in") },
             "First subgraph should see its demos")
-        assertTrue(prompts[1].messages.none { it.content.contains("first-demo-in") },
+        assertTrue(prompts[1].messages.none { it.textContent().contains("first-demo-in") },
             "Second subgraph should not see first subgraph's demos")
     }
 
@@ -511,8 +516,8 @@ class OptimizableSubgraphTest {
         ).use { it.run("input") }
 
         // Both subgraphs get the same instruction — this is the collision (known limitation).
-        assertTrue(prompts[0].messages.any { it.content.contains("Shared instruction") })
-        assertTrue(prompts[1].messages.any { it.content.contains("Shared instruction") },
+        assertTrue(prompts[0].messages.any { it.textContent().contains("Shared instruction") })
+        assertTrue(prompts[1].messages.any { it.textContent().contains("Shared instruction") },
             "Duplicate names cause both subgraphs to share the same config entry (known limitation)")
     }
 
@@ -621,12 +626,12 @@ class OptimizableSubgraphTest {
 
         // The first subgraph's intermediate should contain "First." instruction
         assertTrue(
-            firstDemo.intermediateMessages.any { it.content.contains("First.") },
+            firstDemo.intermediateMessages.any { it.textContent().contains("First.") },
             "First subgraph's intermediate trace should contain its own instruction"
         )
         // The second subgraph's intermediate should contain "Second." instruction
         assertTrue(
-            secondDemo.intermediateMessages.any { it.content.contains("Second.") },
+            secondDemo.intermediateMessages.any { it.textContent().contains("Second.") },
             "Second subgraph's intermediate trace should contain its own instruction"
         )
     }
@@ -707,21 +712,21 @@ class OptimizableSubgraphTest {
         // Instruction resolved from config
         assertTrue(prompts.isNotEmpty())
         assertTrue(
-            prompts.first().messages.any { it.content.contains("Optimized inner") },
+            prompts.first().messages.any { it.textContent().contains("Optimized inner") },
             "Nested optimizable subgraph should use config instruction"
         )
         assertTrue(
-            prompts.first().messages.none { it.content.contains("Inner default.") },
+            prompts.first().messages.none { it.textContent().contains("Inner default.") },
             "Default instruction should not appear"
         )
 
         // Demos injected
         assertTrue(
-            prompts.first().messages.any { it.content == "demo-in" },
+            prompts.first().messages.any { it.textContent() == "demo-in" },
             "Demos should be injected into nested subgraph"
         )
         assertTrue(
-            prompts.first().messages.any { it.content == "demo-out" },
+            prompts.first().messages.any { it.textContent() == "demo-out" },
             "Demos should be injected into nested subgraph"
         )
 
@@ -773,14 +778,23 @@ class OptimizableSubgraphTest {
 
         // Should contain the subgraph's own system message (from defineTask)
         assertTrue(
-            demo.intermediateMessages.any { it.content.contains("Classify this.") },
-            "Should contain subgraph's own instruction. Got: ${demo.intermediateMessages.map { "${it.role}: ${it.content.take(50)}" }}"
+            demo.intermediateMessages.any { it.textContent().contains("Classify this.") },
+            "Should contain subgraph's own instruction. Got: ${demo.intermediateMessages.map { "${it.role}: ${it.textContent().take(50)}" }}"
         )
 
         // Should NOT contain the parent system prompt
         assertTrue(
-            demo.intermediateMessages.none { it.content.contains("Parent system prompt that should NOT appear") },
+            demo.intermediateMessages.none { it.textContent().contains("Parent system prompt that should NOT appear") },
             "Should not contain parent system prompt in freshHistory=true"
+        )
+
+        // Neither the inherited system message nor the injected instruction may survive: under
+        // FULL_TRACE these are replayed verbatim, so a captured instruction would end up shown next
+        // to a newer candidate instruction. Asserted on the role, since defineTask here also embeds
+        // the instruction text in the user query.
+        assertTrue(
+            demo.intermediateMessages.none { it is Message.System },
+            "Demonstrations must carry no system messages. Got: ${demo.intermediateMessages.map { it.role }}"
         )
     }
 
@@ -824,22 +838,22 @@ class OptimizableSubgraphTest {
 
         // Should NOT contain any of the inherited messages
         assertTrue(
-            demo.intermediateMessages.none { it.content.contains("Inherited system prompt") },
+            demo.intermediateMessages.none { it.textContent().contains("Inherited system prompt") },
             "Should not contain inherited system prompt"
         )
         assertTrue(
-            demo.intermediateMessages.none { it.content.contains("Inherited user message") },
+            demo.intermediateMessages.none { it.textContent().contains("Inherited user message") },
             "Should not contain inherited user message"
         )
         assertTrue(
-            demo.intermediateMessages.none { it.content.contains("Inherited assistant reply") },
+            demo.intermediateMessages.none { it.textContent().contains("Inherited assistant reply") },
             "Should not contain inherited assistant reply"
         )
 
         // Should contain the subgraph's own task description (as user message in non-fresh mode)
         assertTrue(
-            demo.intermediateMessages.any { it.content.contains("Classify this.") },
-            "Should contain subgraph's own task. Got: ${demo.intermediateMessages.map { "${it.role}: ${it.content.take(50)}" }}"
+            demo.intermediateMessages.any { it.textContent().contains("Classify this.") },
+            "Should contain subgraph's own task. Got: ${demo.intermediateMessages.map { "${it.role}: ${it.textContent().take(50)}" }}"
         )
     }
 
@@ -862,16 +876,16 @@ class OptimizableSubgraphTest {
 
         // finalize_task_result should be converted to Assistant, not kept as Tool.Call
         assertTrue(
-            demo.intermediateMessages.none { it is Message.Tool.Call },
-            "finalize_task_result Tool.Call should be converted to Assistant. Got: ${demo.intermediateMessages.map { "${it::class.simpleName}(${it.content.take(30)})" }}"
+            demo.intermediateMessages.none { it.hasToolCalls() },
+            "finalize_task_result Tool.Call should be converted to Assistant. Got: ${demo.intermediateMessages.map { "${it::class.simpleName}(${it.textContent().take(30)})" }}"
         )
         assertTrue(
-            demo.intermediateMessages.none { it is Message.Tool.Result },
+            demo.intermediateMessages.none { it.hasToolResults() },
             "finalize_task_result Tool.Result should be removed"
         )
         // The converted Assistant message should contain the tool output
         assertTrue(
-            demo.intermediateMessages.any { it is Message.Assistant && it.content.contains("done") },
+            demo.intermediateMessages.any { it is Message.Assistant && it.textContent().contains("done") },
             "Should contain an Assistant message with the finish tool output"
         )
     }
@@ -902,13 +916,13 @@ class OptimizableSubgraphTest {
         assertNotNull(secondDemo.intermediateMessages)
 
         // First should contain "First instruction." but NOT "Second instruction."
-        assertTrue(firstDemo.intermediateMessages.any { it.content.contains("First instruction.") })
-        assertTrue(firstDemo.intermediateMessages.none { it.content.contains("Second instruction.") },
+        assertTrue(firstDemo.intermediateMessages.any { it.textContent().contains("First instruction.") })
+        assertTrue(firstDemo.intermediateMessages.none { it.textContent().contains("Second instruction.") },
             "First subgraph's intermediate should not contain second's messages")
 
         // Second should contain "Second instruction." but NOT "First instruction."
-        assertTrue(secondDemo.intermediateMessages.any { it.content.contains("Second instruction.") })
-        assertTrue(secondDemo.intermediateMessages.none { it.content.contains("First instruction.") },
+        assertTrue(secondDemo.intermediateMessages.any { it.textContent().contains("Second instruction.") })
+        assertTrue(secondDemo.intermediateMessages.none { it.textContent().contains("First instruction.") },
             "Second subgraph's intermediate should not contain first's messages")
     }
 }

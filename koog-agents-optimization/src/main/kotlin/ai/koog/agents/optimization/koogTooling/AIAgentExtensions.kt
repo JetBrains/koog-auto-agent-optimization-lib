@@ -13,9 +13,8 @@ import ai.koog.prompt.dsl.prompt
 import ai.koog.prompt.executor.model.PromptExecutor
 import ai.koog.prompt.llm.LLModel
 import ai.koog.prompt.params.LLMParams
+import ai.koog.utils.time.KoogClock
 import kotlin.reflect.KClass
-import kotlin.reflect.typeOf
-import kotlin.time.Clock
 import kotlin.uuid.ExperimentalUuidApi
 
 /**
@@ -53,9 +52,11 @@ public inline fun <reified Input, reified Output> AIAgent.Companion.invokeGraphA
     strategy: AIAgentGraphStrategy<Input, Output>,
     toolRegistry: ToolRegistry = ToolRegistry.EMPTY,
     id: String? = null,
-    clock: Clock = Clock.System,
-    systemPrompt: String = "",
-    temperature: Double = 1.0,
+    clock: KoogClock = KoogClock.System,
+    systemPrompt: String? = "",
+    // Nullable so callers can OMIT the temperature (null) for models that reject a custom
+    // value; a null temperature is not sent, so the provider applies its fixed default.
+    temperature: Double? = 1.0,
     numberOfChoices: Int = 1,
     maxIterations: Int = 50,
     noinline installFeatures: GraphAIAgent.FeatureContext.() -> Unit = {},
@@ -64,8 +65,6 @@ public inline fun <reified Input, reified Output> AIAgent.Companion.invokeGraphA
     // properties living on each implementation rather than the interface, so this helper targets
     // GraphAIAgent concretely.
     return GraphAIAgent(
-        inputType = typeOf<Input>(),
-        outputType = typeOf<Output>(),
         id = id,
         promptExecutor = promptExecutor,
         strategy = strategy,
@@ -77,7 +76,10 @@ public inline fun <reified Input, reified Output> AIAgent.Companion.invokeGraphA
                     numberOfChoices = numberOfChoices
                 )
             ) {
-                system(systemPrompt)
+                // An empty text block is rejected by e.g. Anthropic.
+                if (!systemPrompt.isNullOrBlank()) {
+                    system(systemPrompt)
+                }
             },
             model = llmModel,
             maxAgentIterations = maxIterations,
