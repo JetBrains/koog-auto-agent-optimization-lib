@@ -113,6 +113,7 @@ MIPROv2Optimizer<Input, Output, InputLabel>(
     metaModel: LLModel,
     autoMode: AutoRunMode = AutoRunMode.LIGHT,    // LIGHT | MEDIUM | HEAVY
     numCandidatesOverride: Int? = null,
+    valExamplesOverride: Int? = null,
     numTrialsOverride: Int? = null,
     maxBootstrappedDemos: Int = 4,
     maxTotalDemos: Int = 8,
@@ -120,6 +121,7 @@ MIPROv2Optimizer<Input, Output, InputLabel>(
     proposerConfig: InstructionProposerConfig = InstructionProposerConfig(),
     storagePath: ResilientPath,                   // named arg, has no default
     randomSeed: Long = 42,
+    validationSplitSeed: Long = 42,
     parallelism: Int = 1,
 )
 ```
@@ -129,8 +131,9 @@ Key params:
 - `metaModel` — the LLM used for instruction proposal and dataset summarization.
 - `autoMode` — a preset budget: `LIGHT`, `MEDIUM`, or `HEAVY`. Higher modes try
   more candidates and trials (and cost more). Start with `LIGHT`.
-- `numCandidatesOverride` / `numTrialsOverride` — manual overrides for the search
+- `numCandidatesOverride` / `valExamplesOverride` / `numTrialsOverride` — manual overrides for the search
   budget when the preset doesn't fit.
+- `validationSplitSeed` — the training set is shuffled with it and split in DSPy's MIPROv2 proportions: 20 % bootstraps demos and grounds the instruction proposals, and the validation items candidates are scored on come from the other 80 %, so no candidate is scored on an item its demos came from. `valExamplesOverride` can't exceed that 80 %. The seed is separate from `randomSeed`, so runs with different search seeds validate on the same items.
 - `storagePath` — note this has **no default**, so pass it as a named argument
   even though it sits after defaulted params.
 - `parallelism` — concurrent runs during bootstrapping.
@@ -184,6 +187,9 @@ GEPAOptimizer<Input, Output, InputLabel>(
     validationFailureRateThreshold: Double = 0.9,
     seedValidationFailureRateThreshold: Double = 0.0,
     abortOnFailureRateExceeded: Boolean = true,
+    reflectionFailurePolicy: GEPAReflectionFailurePolicy = GEPAReflectionFailurePolicy.SKIP_BATCH,
+    saveCheckpointPath: ResilientPath? = null,
+    resumeCheckpointPath: ResilientPath? = null,
 )
 ```
 
@@ -212,6 +218,10 @@ Key params:
 - `abortOnFailureRateExceeded` — whether exceeding any rollout failure-rate threshold aborts GEPA.
   When `false`, GEPA evaluates the full rollout set and records threshold breaches without terminating
   the optimization; terminal agent failures still receive `failureScore`.
+
+- `reflectionFailurePolicy` — what GEPA does when a reflection call still fails after its retries. `SKIP_BATCH` logs the failure and skips the feedback batch, as the reference GEPA implementation does; the batch's parent rollouts stay spent, so watch the run's logs for failed reflections. `ABORT` stops the optimization.
+- `saveCheckpointPath` — where GEPA saves its search state: the candidate pool with validation scores and parents, the spent budget and the step counters. It is saved after the seed validation, after every feedback batch and after every merge attempt, each save overwriting the previous one.
+- `resumeCheckpointPath` — a checkpoint saved by an earlier run, to continue its search. GEPA checks it was saved for the same modules and the same feedback and validation items, restores the pool and the spent budget, and runs until `numRollouts` is spent. The seed validation isn't run again, since every checkpoint already holds its scores. The random generator is seeded from `randomSeed` plus the spent budget, so the resumed run doesn't repeat the batch order and parent choices the stopped run started with.
 
 Thresholds use a strict `>` comparison: `0.0` permits no failures, while `1.0` disables the cap.
 Failed rollout items remain visible as failed stages in the training record even when their rollout

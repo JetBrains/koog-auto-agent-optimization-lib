@@ -47,8 +47,8 @@ internal class MIPROv2ParameterResolutionTest {
         assertEquals(AutoRunMode.LIGHT.numCandidates, setup.numCandidates)
         // Two modules and six candidates put the formula (21) above LIGHT's cap, so the cap applies.
         assertEquals(AutoRunMode.LIGHT.maxTrials, setup.numTrials)
-        // The dataset is smaller than the mode's validation cap, so the whole of it is scored.
-        assertEquals(DATASET_SIZE, setup.validationSetSize)
+        // The 80 % of the dataset left for validation is smaller than the mode's number, so all of it is scored.
+        assertEquals(DATASET_SIZE * 4 / 5, setup.validationSetSize)
         assertEquals(emptyList(), setup.budgetOverrides)
     }
 

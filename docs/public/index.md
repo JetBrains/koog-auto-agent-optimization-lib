@@ -34,7 +34,7 @@ Then add the dependencies:
 repositories { mavenLocal(); mavenCentral() }
 
 dependencies {
-    implementation("ai.koog:koog-agents-optimization:0.1.0-SNAPSHOT") // from mavenLocal
+    implementation("ai.koog.optimization:koog-agents-optimization:0.1.0") // from mavenLocal
     implementation("ai.koog:koog-agents:1.1.1") // the agent you optimize is a Koog agent
 }
 ```

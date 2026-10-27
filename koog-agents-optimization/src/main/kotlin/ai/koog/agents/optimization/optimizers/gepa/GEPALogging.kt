@@ -65,6 +65,18 @@ internal fun StageScope<*, *, *>.logGepaSeedCandidate(
     }
 }
 
+/** Records that the run continues from a checkpoint, with the pool and budget it restored. */
+internal fun StageScope<*, *, *>.logGepaResumed(checkpointPath: ResilientPath, candidates: Int, rolloutsSpent: Int) {
+    appendToActionLog {
+        put("resumedFromCheckpoint", checkpointPath.toFilePathLog())
+        put("restoredCandidates", candidates)
+        put("restoredRolloutsSpent", rolloutsSpent)
+    }
+    logger.info {
+        "GEPA resumed from ${checkpointPath.toFilePathLog()}: $candidates candidates, $rolloutsSpent rollouts spent."
+    }
+}
+
 // ---------- Rollouts ----------
 
 /** Records the scores one candidate reached over a rollout set, one entry per item in dataset order. */
@@ -180,6 +192,7 @@ internal enum class GEPAStepOutcome(val label: String) {
     PARENT_ROLLOUTS_FAILED("parent rollouts failed"),
     PARENT_ALREADY_PERFECT("parent already perfect"),
     NO_MODULE_FEEDBACK("no module feedback"),
+    REFLECTION_FAILED("reflection failed"),
     CANDIDATE_ALREADY_IN_POOL("candidate already in pool"),
 
     NO_MERGE_PROPOSAL("no merge proposal"),

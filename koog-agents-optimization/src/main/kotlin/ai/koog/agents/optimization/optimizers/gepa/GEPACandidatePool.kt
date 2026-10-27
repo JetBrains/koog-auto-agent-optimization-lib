@@ -62,6 +62,23 @@ internal class GEPACandidatePool(
     /** Returns the id [candidate] was given when it entered the pool. */
     fun idOf(candidate: OptimizationArtifact): String = candidateIds.getValue(candidate)
 
+    /** Returns the candidate that entered the pool under [id]. */
+    fun candidateWithId(id: String): OptimizationArtifact =
+        candidateIds.entries.firstOrNull { (_, candidateId) -> candidateId == id }?.key
+            ?: error("No candidate with id $id in the pool")
+
+    /** Returns every entry with its ancestry, scores and module cursor, in insertion order. */
+    fun toCheckpointCandidates(): List<GEPACheckpointCandidate> =
+        candidateScores.keys.map { candidate ->
+            GEPACheckpointCandidate(
+                id = idOf(candidate),
+                artifact = candidate,
+                parentIds = candidateParents.getValue(candidate).map { parent -> idOf(parent) },
+                validationScores = scoresOf(candidate),
+                nextModuleIndex = candidateNextModuleIndex.getValue(candidate),
+            )
+        }
+
     /** Returns every entry with its average validation score and its parents, in insertion order. */
     fun summarizeCandidates(): List<GEPACandidateSummary> =
         candidateScores.keys.map { candidate ->
@@ -247,5 +264,25 @@ internal class GEPACandidatePool(
 
     fun sumValidationScores(candidate: OptimizationArtifact, idxs: List<Int>): Double {
         return candidateScores.getValue(candidate).withIndex().filter { idxs.contains(it.index) }.sumOf { it.value }
+    }
+
+    companion object {
+        /**
+         * Builds a pool holding the checkpointed [entries] in their saved order, so each one gets back its saved id,
+         * parents, scores and module cursor.
+         */
+        fun fromCheckpoint(
+            evaluationDatasetSize: Int,
+            random: Random,
+            entries: List<GEPACheckpointCandidate>,
+        ): GEPACandidatePool = GEPACandidatePool(evaluationDatasetSize, random).apply {
+            for (entry in entries) {
+                add(entry.artifact, entry.parentIds.map(::candidateWithId), entry.validationScores)
+                check(idOf(entry.artifact) == entry.id) {
+                    "Checkpointed candidate ${entry.id} came back as ${idOf(entry.artifact)}"
+                }
+                candidateNextModuleIndex[entry.artifact] = entry.nextModuleIndex
+            }
+        }
     }
 }

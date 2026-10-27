@@ -42,6 +42,21 @@ public enum class GEPAModuleSelectionStrategy {
 }
 
 /**
+ * What GEPA does when a reflection call still fails after its retries.
+ */
+public enum class GEPAReflectionFailurePolicy {
+    /** Stop the optimization. */
+    ABORT,
+
+    /**
+     * Log the failure and skip its feedback batch, as the reference GEPA implementation does. A skipped batch costs
+     * only its parent rollouts, so a run keeps going whatever the share of failed reflections; watch the run's logs
+     * for them.
+     */
+    SKIP_BATCH,
+}
+
+/**
  * The two sets GEPA trains on, split off a training set.
  *
  * @property feedbackSet Items GEPA collects module-level textual feedback on (`D_feedback` in the paper).
@@ -68,6 +83,14 @@ public data class GEPATrainSetSplit<Input, InputLabel>(
  * @property validationFailureRateThreshold Maximum failed-item ratio tolerated in candidate validation runs.
  * @property seedValidationFailureRateThreshold Maximum failed-item ratio tolerated in the initial seed validation.
  * @property abortOnFailureRateExceeded Whether exceeding a rollout failure-rate threshold aborts the optimization.
+ * @property reflectionFailurePolicy What GEPA does when a reflection call still fails after its retries.
+ * @property saveCheckpointPath Where GEPA saves its search state, so a stopped run can be resumed: after the seed
+ * validation, after every feedback batch and after every merge attempt, each save overwriting the previous one.
+ * `null` saves none.
+ * @property resumeCheckpointPath A checkpoint saved by an earlier run, to continue its search. GEPA checks it was saved
+ * for the same modules and split, restores the candidate pool and the spent budget, and runs until [numRollouts] is
+ * spent. The random generator is seeded from [randomSeed] plus the spent budget, so the resumed run doesn't repeat the
+ * batch order and parent choices the stopped run started with.
  */
 public class GEPAOptimizer<Input, Output, InputLabel>(
     private val gepaFeedback: GEPAFeedback<Input, Output, InputLabel>,
@@ -88,6 +111,9 @@ public class GEPAOptimizer<Input, Output, InputLabel>(
     private val validationFailureRateThreshold: Double = 0.9,
     private val seedValidationFailureRateThreshold: Double = 0.0,
     private val abortOnFailureRateExceeded: Boolean = true,
+    private val reflectionFailurePolicy: GEPAReflectionFailurePolicy = GEPAReflectionFailurePolicy.SKIP_BATCH,
+    private val saveCheckpointPath: ResilientPath? = null,
+    private val resumeCheckpointPath: ResilientPath? = null,
 ) : AgentOptimizer<Input, Output, InputLabel> {
     private val reflectionProposer = GEPAReflectionProposer(
         reflectionModel = reflectionModel,
@@ -117,7 +143,6 @@ public class GEPAOptimizer<Input, Output, InputLabel>(
     override suspend fun train(session: TrainingSession<Input, Output, InputLabel>): TrainingResult =
         session.use(stagesTotal = 1) {
             runStageOrThrow("GEPA optimization") {
-                val random = Random(randomSeed)
                 val modules = discoverModules(trackedAgent)
                 require(modules.isNotEmpty()) { "No modules found" }
 
@@ -130,19 +155,36 @@ public class GEPAOptimizer<Input, Output, InputLabel>(
                 }
                 logGepaRunSetup(modules, feedbackSetSize = feedbackSet.size, validationSetSize = valSet.size)
 
-                // GEPA runs until the rollout budget is exhausted.
+                val runSetup = GEPARunSetup.of(modules, validationSet = valSet, feedbackSet = feedbackSet)
+                val checkpointToResume =
+                    resumeCheckpointPath?.let { path -> readGepaCheckpointToResume(path, runSetup) }
+                // The generator isn't saved in a checkpoint. Official GEPA seeds a resumed run with the same seed as
+                // the stopped one, so it draws the same sequence again from the start; adding the spent budget gives
+                // a resumed run a sequence of its own, still fixed by the seed and the checkpoint.
+                val random = Random(randomSeed + (checkpointToResume?.rolloutsSpent ?: 0))
+
+                // GEPA runs until the rollout budget is exhausted; a resumed run starts with the checkpoint's spent
+                // rollouts already deducted, below.
                 // Budget is consumed by evaluating candidates on any item in the feedback or validation set.
                 // LLM calls for reflection and prompt updates do not count against the budget.
                 val budget = RolloutBudget(numRollouts)
 
-                // Initialize candidate pool with the unoptimized prompts.
-                val candidatePool = initializeCandidatePool(valSet, random, budget)
+                // Initialize candidate pool with the unoptimized prompts, or restore it from the checkpoint.
+                val candidatePool = if (checkpointToResume == null) {
+                    initializeCandidatePool(valSet, random, budget)
+                } else {
+                    budget.spend(checkpointToResume.rolloutsSpent)
+                    val restoredPool =
+                        GEPACandidatePool.fromCheckpoint(valSet.size, random, checkpointToResume.candidates)
+                    logGepaResumed(resumeCheckpointPath, restoredPool.size, checkpointToResume.rolloutsSpent)
+                    restoredPool
+                }
 
                 // Proposes new prompt candidates from parent rollouts.
                 val candidateProposer = GEPACandidateProposer(reflectionProposer, modules)
 
                 val gepaMerge = if (mergeConfig.enabled) {
-                    GEPAMerge(candidatePool, mergeConfig, random)
+                    GEPAMerge(candidatePool, mergeConfig, random, restoredState = checkpointToResume?.merge)
                 } else {
                     null
                 }
@@ -155,8 +197,26 @@ public class GEPAOptimizer<Input, Output, InputLabel>(
                 // 5. Propose new instruction via GEPA's meta reflection and update prompt
                 // 6. Evaluate proposed candidate on feedback batch
                 // 7. If proposed candidate is better on feedback set, evaluate on validation set and add it to the pool
-                var batchIndex = 0
-                var mergeAttemptIndex = 0
+                var batchIndex = checkpointToResume?.batchesRun ?: 0
+                var mergeAttemptIndex = checkpointToResume?.mergeAttempts ?: 0
+
+                fun saveCheckpoint() {
+                    val path = saveCheckpointPath ?: return
+                    writeGepaCheckpoint(
+                        path,
+                        GEPACheckpoint(
+                            formatVersion = GEPACheckpoint.CURRENT_FORMAT_VERSION,
+                            runSetup = runSetup,
+                            candidates = candidatePool.toCheckpointCandidates(),
+                            rolloutsSpent = budget.spent,
+                            batchesRun = batchIndex,
+                            mergeAttempts = mergeAttemptIndex,
+                            merge = gepaMerge?.toState(),
+                        ),
+                    )
+                }
+                saveCheckpoint()
+
                 val feedbackBatches = repeatedShuffled(feedbackSet, random).chunked(feedbackBatchSize).iterator()
                 while (budget.hasRemaining) {
                     // If merge is due, attempt it.
@@ -164,6 +224,7 @@ public class GEPAOptimizer<Input, Output, InputLabel>(
                         mergeAttemptIndex++
                         runMergeAttempt(mergeAttemptIndex, gepaMerge, candidatePool, valSet, budget)
                         gepaMerge.notifyMergeAttemptFinished()
+                        saveCheckpoint()
                         continue
                     }
 
@@ -179,6 +240,7 @@ public class GEPAOptimizer<Input, Output, InputLabel>(
                         gepaMerge = gepaMerge,
                         budget = budget,
                     )
+                    saveCheckpoint()
                 }
 
                 val bestCandidateId = saveBestArtifact(candidatePool)
@@ -276,10 +338,24 @@ public class GEPAOptimizer<Input, Output, InputLabel>(
                 GEPAModuleSelectionStrategy.ALL -> null
             }
             logGepaSelectedModule(selectedModule)
-            val candidate = candidateProposer.proposeCandidate(this, parent, parentRollouts, selectedModule)
-            if (candidate == null) {
-                logGepaStepOutcome(GEPAStepOutcome.NO_MODULE_FEEDBACK)
-                return@runStageOrThrow
+            val proposal = candidateProposer.proposeCandidate(this, parent, parentRollouts, selectedModule)
+            val candidate = when (proposal) {
+                is GEPAProposal.Proposed -> proposal.candidate
+
+                GEPAProposal.NoModuleFeedback -> {
+                    logGepaStepOutcome(GEPAStepOutcome.NO_MODULE_FEEDBACK)
+                    return@runStageOrThrow
+                }
+
+                is GEPAProposal.ReflectionFailed -> {
+                    if (reflectionFailurePolicy == GEPAReflectionFailurePolicy.ABORT) throw proposal.failure
+                    logger.warn {
+                        "Skipping feedback batch $batchIndex because its reflection call failed: " +
+                                "${proposal.failure.failedRecord.failure?.resolvedId ?: proposal.failure.message}."
+                    }
+                    logGepaStepOutcome(GEPAStepOutcome.REFLECTION_FAILED)
+                    return@runStageOrThrow
+                }
             }
             if (candidate in candidatePool) {
                 logger.info { "Skipping proposed candidate because it already exists in the candidate pool." }

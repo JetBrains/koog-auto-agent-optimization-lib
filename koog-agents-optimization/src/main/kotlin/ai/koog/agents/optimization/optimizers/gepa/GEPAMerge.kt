@@ -41,10 +41,25 @@ public data class GEPAMergeConfig(
 //  already in the pool is rejected here, where the reference dedups merged texts across triplets; and
 //  shouldAttemptMerge stops once maxMergeInvocations merges are accepted, where the reference stops
 //  scheduling new ones and still runs those already due.
+/**
+ * GEPA's merge (crossover) of two candidates from [candidatePool].
+ *
+ * A merge picks two Pareto-front candidates with a shared ancestor, where at least one module was changed by only one
+ * of them, and builds a child that takes each module's instruction from the candidate that changed it (the
+ * higher-scoring one when both did). The optimizer scores the child on a validation subsample and adds it to the pool
+ * when it does at least as well as the better parent there.
+ * Merges are scheduled by successful reflections; this class proposes the children and keeps the schedule: merges due,
+ * merges accepted, and the triplets already tried.
+ *
+ * @param restoredState merge state saved by [toState] in a checkpoint, to start from in place of an empty state.
+ * Its triplets name candidates by pool id, so [candidatePool] must already hold the candidates restored from the
+ * same checkpoint.
+ */
 internal class GEPAMerge(
     private val candidatePool: GEPACandidatePool,
     private val config: GEPAMergeConfig = GEPAMergeConfig(),
     private val random: Random = Random,
+    restoredState: GEPAMergeState? = null,
 ) {
     private var mergesDue = 0
     private var acceptedMergeCount = 0
@@ -77,6 +92,23 @@ internal class GEPAMerge(
 
     private val triedMergeTriplets = mutableSetOf<MergeTripletKey>()
 
+    init {
+        if (restoredState != null) {
+            mergesDue = restoredState.mergesDue
+            acceptedMergeCount = restoredState.acceptedMergeCount
+            lastIterFoundNewPrompt = restoredState.lastIterFoundNewPrompt
+            restoredState.triedTriplets.mapTo(triedMergeTriplets) { triplet ->
+                MergeTripletKey(
+                    candidates = setOf(
+                        candidatePool.candidateWithId(triplet.firstCandidateId),
+                        candidatePool.candidateWithId(triplet.secondCandidateId),
+                    ),
+                    ancestor = candidatePool.candidateWithId(triplet.ancestorId),
+                )
+            }
+        }
+    }
+
     fun shouldAttemptMerge(): Boolean {
         return config.enabled && acceptedMergeCount < config.maxMergeInvocations && mergesDue > 0 && lastIterFoundNewPrompt
     }
@@ -96,6 +128,21 @@ internal class GEPAMerge(
     fun notifyMergeAttemptFinished() {
         lastIterFoundNewPrompt = false
     }
+
+    /** Returns the merge counters and tried triplets, with candidates named by their pool ids. */
+    fun toState(): GEPAMergeState = GEPAMergeState(
+        mergesDue = mergesDue,
+        acceptedMergeCount = acceptedMergeCount,
+        lastIterFoundNewPrompt = lastIterFoundNewPrompt,
+        triedTriplets = triedMergeTriplets.map { triplet ->
+            val (firstId, secondId) = triplet.candidates.map(candidatePool::idOf).sorted()
+            GEPAMergeTripletIds(
+                firstCandidateId = firstId,
+                secondCandidateId = secondId,
+                ancestorId = candidatePool.idOf(triplet.ancestor),
+            )
+        },
+    )
 
     fun propose(): MergeProposal? {
         val (frontierRepresentatives, _) = candidatePool.findFrontierRepresentatives()

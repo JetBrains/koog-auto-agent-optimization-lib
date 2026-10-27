@@ -71,12 +71,12 @@ internal class MIPROv2LoggingTest {
         assertEquals("trial kept", gridSearch.string("outcome"))
         assertEquals(0.65, gridSearch.double("bestAverageValidationScore"))
         assertEquals(1, gridSearch.int("bestTrialNumber"))
-        assertEquals(mapOf("__strategy__" to 1, "solve" to 0), gridSearch.indices("bestInstructionIndices"))
-        assertEquals(mapOf("__strategy__" to 1, "solve" to 0), gridSearch.indices("bestDemoSetIndices"))
+        assertEquals(mapOf("__strategy__" to 0, "solve" to 1), gridSearch.indices("bestInstructionIndices"))
+        assertEquals(mapOf("__strategy__" to 0, "solve" to 0), gridSearch.indices("bestDemoSetIndices"))
 
         // The winning indices resolve, through Step 2's list, to the instructions the artifact was saved with.
-        assertEquals("Instruction 2.", run.artifact.strategyInstruction)
-        assertEquals(mapOf("solve" to "Instruction 3."), run.artifact.subgraphInstructions)
+        assertEquals("Instruction 1.", run.artifact.strategyInstruction)
+        assertEquals(mapOf("solve" to "Instruction 4."), run.artifact.subgraphInstructions)
 
         assertEquals(13, run.agentRuns)
         assertEquals(14, run.promptExecutions)
@@ -90,17 +90,17 @@ internal class MIPROv2LoggingTest {
         assertEquals(3, trials.size)
         assertContentEquals(
             listOf(
-                mapOf("__strategy__" to 0, "solve" to 1),
-                mapOf("__strategy__" to 1, "solve" to 0),
+                mapOf("__strategy__" to 2, "solve" to 0),
+                mapOf("__strategy__" to 1, "solve" to 1),
                 mapOf("__strategy__" to 0, "solve" to 0),
             ),
             trials.map { it.indices("instructionIndices") },
         )
         assertContentEquals(
             listOf(
-                mapOf("__strategy__" to 2, "solve" to 1),
                 mapOf("__strategy__" to 1, "solve" to 1),
-                mapOf("__strategy__" to 2, "solve" to 0),
+                mapOf("__strategy__" to 0, "solve" to 0),
+                mapOf("__strategy__" to 0, "solve" to 1),
             ),
             trials.map { it.indices("demoSetIndices") },
         )
@@ -230,7 +230,8 @@ internal class MIPROv2LoggingTest {
                     agentName = "test-agent",
                 ),
                 trackedAgent = agent,
-                dataset = (1..4).map { TrainSetItem("item-$it", "gold-$it") },
+                // Five items split into one bootstrap item and four validation items.
+                dataset = (1..5).map { TrainSetItem("item-$it", "gold-$it") },
                 substepPromptExecutor = executor,
                 metric = { _, _ -> scores[scored++ % scores.size] },
                 serializers = DatasetExecutionSerializers(serializeItem = { it.userQuery }, serializeOutput = { it }),

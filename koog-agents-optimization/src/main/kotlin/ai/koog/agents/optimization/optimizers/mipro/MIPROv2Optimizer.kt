@@ -51,13 +51,18 @@ public enum class AutoRunMode(public val numCandidates: Int, public val valExamp
  * 2. **Instruction proposal**: generates instruction variants via a meta-LLM.
  * 3. **Grid search**: evaluates random (instruction, demo set) combinations on a validation set.
  *
+ * The training dataset is shuffled with [validationSplitSeed] and split in DSPy's MIPROv2 proportions: 20 % goes to demo
+ * generation and instruction proposal, and the validation set is drawn from the other 80 %. No candidate is therefore
+ * scored on an item its demos or instructions were built from.
+ *
  * Produces an [OptimizationArtifact] with the best-scoring instruction and demo set
  * for each optimizable module (strategy-level and per-subgraph).
  *
  * @param metaModel LLM model for meta-LLM calls (instruction proposal, dataset summarization).
  * @param autoMode Preset mode controlling defaults (LIGHT/MEDIUM/HEAVY).
  * @param numCandidatesOverride Manual override for number of candidates per module.
- * @param valExamplesOverride Manual override for the validation-set size used to score candidates.
+ * @param valExamplesOverride Manual override for the validation-set size used to score candidates. The validation set
+ *   can't be larger than the 80 % of the dataset left after the demo-generation items.
  * @param numTrialsOverride Manual override for grid search trials.
  * @param maxBootstrappedDemos Max demos per bootstrap run.
  * @param maxTotalDemos Total demo slots (bootstrapped and labeled).
@@ -65,6 +70,8 @@ public enum class AutoRunMode(public val numCandidates: Int, public val valExamp
  * @param proposerConfig Configuration for an instruction proposal.
  * @param storagePath File path to save/load the optimization artifact.
  * @param randomSeed Seed for reproducibility.
+ * @param validationSplitSeed Seed of the shuffle that decides which items generate demos and which validate. Kept apart
+ *   from [randomSeed], so runs with different [randomSeed] values validate on the same items.
  * @param parallelism Max concurrent operations (bootstrap runs, instruction proposals).
  */
 public class MIPROv2Optimizer<Input, Output, InputLabel>(
@@ -79,6 +86,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
     private val proposerConfig: InstructionProposerConfig = InstructionProposerConfig(),
     public val storagePath: ResilientPath,
     private val randomSeed: Long = 42L,
+    private val validationSplitSeed: Long = 42L,
     private val parallelism: Int = 1,
 ) : AgentOptimizer<Input, Output, InputLabel> {
 
@@ -115,10 +123,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
         val numCandidates = numCandidatesOverride ?: autoMode.numCandidates
         val valExamples = valExamplesOverride ?: autoMode.valExamples
 
-        // Split dataset: first 20% for bootstrap, capped validation set for grid search
-        val splitIndex = maxOf(1, dataset.size / 5)
-        val bootstrapSet = dataset.take(splitIndex)
-        val valSet = dataset.shuffled(Random(random.nextLong())).take(valExamples)
+        val (bootstrapSet, validationSet) = splitTrainSet(dataset, valExamples)
 
         // Discover optimizable modules
         val modules = discoverModules(trackedAgent)
@@ -145,7 +150,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
                 "numTrials".takeIf { numTrialsOverride != null },
             ),
             bootstrapSetSize = bootstrapSet.size,
-            validationSetSize = valSet.size,
+            validationSetSize = validationSet.size,
         )
 
         // Step 1: Demo Generation
@@ -169,7 +174,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
         // DSL via `metaPromptRunner`, so they show up as PromptExecutionRecords under this stage.
         val instructionCandidates = runStageOrThrow("Step 2: Instruction Proposal") {
             logger.info { "MIPRO Step 2: Proposing $numCandidates instructions per module..." }
-            val trainExamples = dataset.map { "${it.userQuery}" }
+            val trainExamples = bootstrapSet.map { "${it.userQuery}" }
             val proposer = InstructionProposer.create(
                 agent = trackedAgent,
                 modules = modules,
@@ -194,7 +199,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
                 modules = modules,
                 instructionCandidates = instructionCandidates,
                 demoCandidates = demoCandidates,
-                valSet = valSet,
+                validationSet = validationSet,
                 numTrials = numTrials,
             )
         }
@@ -213,7 +218,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
         modules: List<OptimizableModule>,
         instructionCandidates: Map<String, List<String>>,
         demoCandidates: Map<String, List<List<Demonstration>>>?,
-        valSet: TrainSet<Input, InputLabel>,
+        validationSet: TrainSet<Input, InputLabel>,
         numTrials: Int,
     ): OptimizationArtifact {
         var bestArtifact = OptimizationArtifact()
@@ -223,8 +228,8 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
         var bestDemoSets: Map<String, Int> = emptyMap()
 
         runStageOrThrow("Baseline (no optimization)") {
-            logger.info { "MIPRO baseline (no optimization): evaluating on ${valSet.size} items..." }
-            val baselineScore = evaluateArtifact(OptimizationArtifact(), valSet)
+            logger.info { "MIPRO baseline (no optimization): evaluating on ${validationSet.size} items..." }
+            val baselineScore = evaluateArtifact(OptimizationArtifact(), validationSet)
             bestScore = baselineScore
             bestArtifact = OptimizationArtifact()
             logMiproBaselineScore(baselineScore)
@@ -232,10 +237,10 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
 
         for (trial in 0 until numTrials) {
             runStageOrThrow("Trial ${trial + 1}/$numTrials") {
-                logger.info { "MIPRO trial ${trial + 1}/$numTrials: evaluating on ${valSet.size} items..." }
+                logger.info { "MIPRO trial ${trial + 1}/$numTrials: evaluating on ${validationSet.size} items..." }
                 val combination = sampleTrialArtifact(modules, instructionCandidates, demoCandidates)
                 logMiproTrialCombination(combination.instructionIndices, combination.demoSetIndices)
-                val score = evaluateArtifact(combination.artifact, valSet)
+                val score = evaluateArtifact(combination.artifact, validationSet)
 
                 // Use >= to prefer optimized artifacts over baseline on tie
                 val isNewBest = score >= bestScore
@@ -316,7 +321,7 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
     @OptIn(InternalAgentsApi::class)
     private suspend fun StageScope<Input, Output, InputLabel>.evaluateArtifact(
         artifact: OptimizationArtifact,
-        valSet: TrainSet<Input, InputLabel>,
+        validationSet: TrainSet<Input, InputLabel>,
     ): Double {
         var totalScore = 0.0
         var count = 0
@@ -324,12 +329,29 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
             trackedAgent.installFeatures(this)
             installPromptOptimization { this.artifact = artifact }
         })
-        iterateDataset(name = "Evaluate artifact", dataset = valSet) { item ->
+        iterateDataset(name = "Evaluate artifact", dataset = validationSet) { item ->
             val result = runAgent(item, agentWithArtifact)
             result.onSuccess { totalScore += it.score }
             count++
         }
         return if (count > 0) totalScore / count else 0.0
+    }
+
+    /**
+     * Shuffles [dataset] with [validationSplitSeed] and splits it as DSPy's MIPROv2 does: 20 % (rounded up) goes to
+     * the bootstrap set, and the validation set takes up to [valExamples] of the other items. Two or more items give
+     * both sets at least one.
+     */
+    private fun splitTrainSet(
+        dataset: TrainSet<Input, InputLabel>,
+        valExamples: Int,
+    ): MIPROTrainSetSplit<Input, InputLabel> {
+        val shuffled = dataset.shuffled(Random(validationSplitSeed))
+        val bootstrapSize = dataset.size - dataset.size * 4 / 5
+        return MIPROTrainSetSplit(
+            bootstrapSet = shuffled.take(bootstrapSize),
+            validationSet = shuffled.drop(bootstrapSize).take(valExamples),
+        )
     }
 
     /** Persistence helpers for the optimized [OptimizationArtifact]. */
@@ -355,6 +377,12 @@ public class MIPROv2Optimizer<Input, Output, InputLabel>(
         }
     }
 }
+
+/** MIPRO's split of the dataset: [bootstrapSet] builds demos and proposals, [validationSet] scores candidates. */
+private data class MIPROTrainSetSplit<Input, InputLabel>(
+    val bootstrapSet: TrainSet<Input, InputLabel>,
+    val validationSet: TrainSet<Input, InputLabel>,
+)
 
 /** One sampled (instruction, demo set) combination, with the candidate index it drew for each module. */
 private data class TrialCombination(
