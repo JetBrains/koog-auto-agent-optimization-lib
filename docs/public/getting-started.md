@@ -32,15 +32,14 @@ val executor = MultiLLMPromptExecutor(
 ### Install
 
 ```kotlin
-repositories { mavenLocal(); mavenCentral() }
+repositories { mavenCentral() }
 dependencies {
-    implementation("ai.koog.optimization:koog-agents-optimization:0.1.0") // from mavenLocal
+    implementation("ai.koog.optimization:koog-agents-optimization:0.1.0")
     implementation("ai.koog:koog-agents:1.1.1")
 }
 ```
 
-The optimization library is not on Maven Central yet — publish it to your local Maven repository via
-`./gradlew :koog-agents-optimization:publishToMavenLocal`. See [Overview](index.md) for more.
+See [Overview](index.md) for more.
 
 ## Step 1 — Build the agent
 

@@ -25,22 +25,13 @@ A project of the APR team from JetBrains Research.
 
 ## Install
 
-> [!NOTE]
-> This library is **not yet published to Maven Central.** Publish it to your local Maven repository
-> and depend on it from there.
-
-```bash
-git clone https://github.com/JetBrains/koog-auto-agent-optimization-lib.git
-cd koog-auto-agent-optimization-lib && ./gradlew :koog-agents-optimization:publishToMavenLocal
-```
-
-Then depend on it:
+The library is on [Maven Central](https://central.sonatype.com/artifact/ai.koog.optimization/koog-agents-optimization):
 
 ```kotlin
-repositories { mavenLocal(); mavenCentral() }
+repositories { mavenCentral() }
 
 dependencies {
-    implementation("ai.koog.optimization:koog-agents-optimization:0.1.0") // from mavenLocal
+    implementation("ai.koog.optimization:koog-agents-optimization:0.1.0")
     implementation("ai.koog:koog-agents:1.1.1") // the agent you optimize is a Koog agent
 }
 ```

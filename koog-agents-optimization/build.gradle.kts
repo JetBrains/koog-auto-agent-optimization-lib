@@ -152,9 +152,9 @@ tasks.register("publishMavenToCentralPortal") {
         val auth = "Bearer " + Base64.getEncoder().encodeToString("${userName.get()}:${token.get()}".toByteArray())
         val client = OkHttpClient()
         val bundleFile = bundle.get().asFile
-        // USER_MANAGED: a validated deployment waits in the Central Portal until someone presses Publish
+        // AUTOMATIC: a deployment that passes validation is released to Maven Central right away
         val upload = Request.Builder()
-            .url("$portal/upload?name=$deploymentName&publishingType=USER_MANAGED")
+            .url("$portal/upload?name=$deploymentName&publishingType=AUTOMATIC")
             .header("Authorization", auth)
             .post(
                 MultipartBody.Builder()
@@ -168,7 +168,7 @@ tasks.register("publishMavenToCentralPortal") {
             check(response.code == 201) { "Upload to Central Portal failed with status ${response.code}: $body" }
             body.trim()
         }
-        logger.lifecycle("Uploaded deployment $deploymentId, waiting for validation")
+        logger.lifecycle("Uploaded deployment $deploymentId, waiting for it to be published")
 
         // Validation runs after the upload, so a 201 alone does not mean the bundle is accepted
         val status = Request.Builder()
@@ -176,9 +176,9 @@ tasks.register("publishMavenToCentralPortal") {
             .header("Authorization", auth)
             .post("".toRequestBody())
             .build()
-        val deadline = System.currentTimeMillis() + 30 * 60 * 1000
+        val deadline = System.currentTimeMillis() + 60 * 60 * 1000
         while (true) {
-            check(System.currentTimeMillis() < deadline) { "Deployment $deploymentId is not validated after 30 minutes" }
+            check(System.currentTimeMillis() < deadline) { "Deployment $deploymentId is not published after 60 minutes" }
             val result = try {
                 client.newCall(status).execute().use { response ->
                     val body = response.body?.string().orEmpty()
@@ -190,10 +190,8 @@ tasks.register("publishMavenToCentralPortal") {
                 null
             }
             when (val state = result?.get("deploymentState")) {
-                "VALIDATED" -> {
-                    logger.lifecycle(
-                        "Deployment $deploymentId is validated; publish it at https://central.sonatype.com/publishing/deployments",
-                    )
+                "PUBLISHED" -> {
+                    logger.lifecycle("Deployment $deploymentId is published to Maven Central")
                     return@doLast
                 }
                 "FAILED" -> error("Deployment $deploymentId failed validation: ${JsonOutput.prettyPrint(JsonOutput.toJson(result["errors"]))}")
